@@ -24,3 +24,8 @@ OUT=abc
 if [ "$("$GO" env GOOS)" = windows ]; then OUT=abc.exe; fi
 "$GO" build -ldflags "-X main.version=$VERSION" -o "$OUT" ./cmd/abc
 echo "built $OUT ($VERSION)"
+if [ "$OUT" = abc.exe ]; then
+	# abcw.exe: the same program without a console window (quiet start; logs go to abc.log).
+	"$GO" build -ldflags "-X main.version=$VERSION -H windowsgui" -o abcw.exe ./cmd/abc
+	echo "built abcw.exe ($VERSION, no console window)"
+fi

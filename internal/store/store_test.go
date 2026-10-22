@@ -28,7 +28,7 @@ func TestOpenMigrateIdempotent(t *testing.T) {
 	}
 	ctx := context.Background()
 	v, ok, err := d.Meta(ctx, "schema_version")
-	if err != nil || !ok || v != "2" {
+	if err != nil || !ok || v != "3" {
 		t.Fatalf("schema_version = %q %v %v", v, ok, err)
 	}
 	var mode string
@@ -395,8 +395,8 @@ func TestMigrate2AddsAutoColumns(t *testing.T) {
 	}
 	defer d.Close()
 	ctx := context.Background()
-	if v, _, _ := d.Meta(ctx, "schema_version"); v != "2" {
-		t.Fatalf("schema_version = %q, want 2", v)
+	if v, _, _ := d.Meta(ctx, "schema_version"); v != "3" { // migrate_2 then migrate_3
+		t.Fatalf("schema_version = %q, want 3", v)
 	}
 	hasCol := func(table, col string) bool {
 		rows, err := d.SQL().Query(`SELECT name FROM pragma_table_info(?)`, table)

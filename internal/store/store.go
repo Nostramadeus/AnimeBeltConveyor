@@ -20,6 +20,10 @@ var sqlFS embed.FS
 
 // SchemaVersion is the version schema.sql creates. Later versions add
 // migrate_N.sql files (N = 2, 3, ...) next to schema.sql; they are applied in order.
+// It stays 1 because schema.sql is still the v1 schema: a fresh database runs
+// migrate_2.sql and migrate_3.sql on top of it and ends at schema_version 3,
+// like an upgraded one. Raising it without folding the migrations into
+// schema.sql would skip them on a fresh database.
 const SchemaVersion = 1
 
 // ErrNotFound is returned by Get* functions when no row matches.

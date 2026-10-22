@@ -23,6 +23,10 @@
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   const baseName = (p) => String(p || '').split(/[\\/]/).pop();
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + 's'}`;
+  /** SPEC-v1.3 1.5: "3 (173)" when the episode has an absolute number, else "3". */
+  const epNum = (n, abs) => (abs != null && abs !== '' ? `${n} (${abs})` : String(n));
+  /** The show's effective offset (manual episode_offset first, else AniList's abs_offset); 0 = none. */
+  const effOffset = (s) => (s && Number(s.episode_offset)) || (s && Number(s.abs_offset)) || 0;
   function safeUrl(u) {
     if (typeof u !== 'string') return '';
     u = u.trim();
@@ -154,6 +158,7 @@
     eventIds: new Set(),
     lastEventId: 0,
     last: store.get('last'), // {id, banner_url, cover_url, color}: the show touched last
+    quit: false, // Settings > Quit ABC was confirmed and the server answered
   };
   const FALLBACK_ACCENT = '#8b9cff';
   const OS_WIN = /win/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '');
@@ -162,6 +167,7 @@
   // ------------------------------------------------------------------ API (SPEC section 8)
   class ApiError extends Error { constructor(msg, status, body) { super(msg); this.status = status; this.body = body; } }
   async function api(method, path, body) {
+    if (S.quit) return new Promise(() => {}); // ABC has quit: no more requests, no error toasts
     const opt = { method, headers: { Accept: 'application/json' } };
     if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
     let res;
@@ -217,11 +223,14 @@
     testMagnet: () => api('GET', '/settings/test/magnet'),
     // SPEC-v1.1 section 9 (auto-download guard rails)
     setEpisodeAuto: (id, n, auto) => api('POST', `/shows/${id}/episodes/${n}/auto`, { auto }),
+    // SPEC-v1.3 2.3: failed releases -> skipped ("cleared by user"); episode null = the whole show
+    clearFailed: (id, episode) => api('POST', `/shows/${id}/releases/clear-failed`, episode != null ? { episode } : undefined),
     missingPreview: (id) => api('GET', `/shows/${id}/download-missing`),
     downloadMissing: (id) => api('POST', `/shows/${id}/download-missing`),
     // SPEC-v1.1 section 11 (bulk watched, honest Home hero)
     watchedThrough: (id, number) => api('POST', `/shows/${id}/watched-through`, { number }),
     missing: () => api('GET', '/missing'),
+    quit: () => api('POST', '/quit'),
   };
   /** Absolute path test (Windows drive, UNC, or unix). The server resolves relative paths against its own
       working directory, which is never what the user meant, so the UI asks for a full path. */
@@ -252,6 +261,7 @@
     download: '<path d="M12 4v11M7 10.5l5 5 5-5"/><path d="M5 19.5h14"/>',
     magnet: '<path d="M5 4.5h4v7a3 3 0 0 0 6 0v-7h4v7a7 7 0 0 1-14 0z"/><path d="M5 8.5h4M15 8.5h4"/>',
     x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    power: '<path d="M12 3.5v8"/><path d="M7 6.5a7.5 7.5 0 1 0 10 0"/>',
     chevL: '<path d="M14.5 5.5 8 12l6.5 6.5"/>',
     chevR: '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
@@ -463,7 +473,7 @@
     const tip = `${title} · episode ${c.it.episode}${c.dub ? ' (dub)' : ''} · ${fFull(c.ts)} · ${label}`;
     return h`<a class="ep-chip ${cls === 's-watched' ? 'is-watched' : ''}" href="#/show/${c.it.show_id}" title="${tip}">
       <span class="dot ${cls}" aria-hidden="true"></span>
-      ${withTitle ? h`<span class="t">${title}</span><span class="m">Ep ${c.it.episode}${c.dub ? ' dub' : ''} · ${fTime(c.ts)}</span>` : h`<span class="t">Ep ${c.it.episode}${c.dub ? ' dub' : ''}</span><span class="m">${fTime(c.ts)}</span>`}
+      ${withTitle ? h`<span class="t">${title}</span><span class="m">Ep ${epNum(c.it.episode, c.it.abs_number)}${c.dub ? ' dub' : ''} · ${fTime(c.ts)}</span>` : h`<span class="t">Ep ${epNum(c.it.episode, c.it.abs_number)}${c.dub ? ' dub' : ''}</span><span class="m">${fTime(c.ts)}</span>`}
       <span class="sr-only">${label}</span>
     </a>`;
   }
@@ -475,7 +485,7 @@
     return h`<a class="wk-ep ${cls === 's-watched' ? 'is-watched' : ''}" href="#/show/${c.it.show_id}" title="${title} · episode ${c.it.episode}${c.dub ? ' (dub)' : ''} · ${fFull(c.ts)} · ${label}">
       <img class="wk-thumb" src="${safeUrl(show.cover_url)}" alt="" loading="lazy">
       <span class="wk-t">${title}</span>
-      <span class="wk-m"><span class="dot ${cls}" aria-hidden="true"></span>Ep ${c.it.episode}${c.dub ? ' dub' : ''}</span>
+      <span class="wk-m"><span class="dot ${cls}" aria-hidden="true"></span>Ep ${epNum(c.it.episode, c.it.abs_number)}${c.dub ? ' dub' : ''}</span>
       <span class="wk-time">${fTime(c.ts)}</span>
       <span class="sr-only">${label}</span>
     </a>`;
@@ -651,6 +661,21 @@
           // The toggle lives in the row's ⋯ menu, which is closed after the repaint: focus that menu's button.
           focusFirst(`#ep-${n} [data-menu]`, `#ep-${n} .btn-watch`);
         },
+        // SPEC-v1.3 2.3: failed releases become skipped ("cleared by user"); auto flags are not touched.
+        'clear-failed': async () => {
+          const r = await API.clearFailed(id);
+          const n = (r && r.cleared) || 0;
+          toast(`Cleared ${plural(n, 'failed release')}`, 'ok');
+          await reload();
+          focusFirst('[data-menu="show-more"]', '#play-next');
+        },
+        'clear-failed-ep': async (btn, ds) => {
+          const n = Number(ds.ep);
+          await API.clearFailed(id, n);
+          toast('Cleared', 'ok');
+          await reload();
+          focusFirst(`#ep-${n} [data-menu]`, `#ep-${n} .btn-watch`);
+        },
         'download-missing': async () => {
           const r = await downloadMissingFlow(id);
           if (r.preview) st.preview = r.preview;
@@ -726,6 +751,8 @@
     const seasonTxt = s.season && s.season_year ? `${pretty(s.season)} ${s.season_year}` : s.season_year || '';
     const eps = (d.episodes || []).slice().sort((a, b) => a.number - b.number);
     const nextFile = eps.find((e) => e.file && !e.watched_at);
+    const off = effOffset(s); // SPEC-v1.3 1.5: "Next Ep 3 (173)"
+    const failedN = (d.releases || []).filter((r) => r.status === 'failed').length; // SPEC-v1.3 2.3
     const color = isHex(s.color) ? raw(`style="--c:${s.color}"`) : '';
     return h`<section class="show-head" ${color}>
       <div class="show-banner" data-bg="${s.banner_url || ''}"></div>
@@ -740,17 +767,18 @@
             ${seasonTxt ? h`<span class="chip">${seasonTxt}</span>` : ''}
             <span class="chip">${s.episodes_total ? `${fNum(s.episodes_total)} eps` : 'Episodes: unknown'}</span>
             ${s.duration_min ? h`<span class="chip">${s.duration_min} min</span>` : ''}
-            ${s.next && s.next.aired_at ? h`<span class="chip chip-accent" title="${fFull(s.next.aired_at)}">${ico('clock')}Next Ep ${s.next.episode} · ${fWhen(s.next.aired_at)}</span>` : ''}
+            ${s.next && s.next.aired_at ? h`<span class="chip chip-accent" title="${fFull(s.next.aired_at)}">${ico('clock')}Next Ep ${epNum(s.next.episode, off > 0 ? s.next.episode + off : null)} · ${fWhen(s.next.aired_at)}</span>` : ''}
           </div>
           <div class="show-prog">${progBar(s, true)}</div>
           <div class="show-actions">
-            ${nextFile ? h`<button class="btn btn-primary" data-act="play" data-file="${nextFile.file.id}" data-show="${s.id}" data-label="episode ${nextFile.number}" id="play-next">${ico('play')}Play episode ${nextFile.number}</button>` : ''}
+            ${nextFile ? h`<button class="btn btn-primary" data-act="play" data-file="${nextFile.file.id}" data-show="${s.id}" data-label="episode ${nextFile.number}" id="play-next">${ico('play')}Play episode ${epNum(nextFile.number, nextFile.abs_number)}</button>` : ''}
             ${watchedThroughForm(d)}
             ${missing ? h`<button class="btn" data-act="download-missing" title="${plural(missing, 'aired episode')} without a file or a release">${ico('download')}Download all missing<span class="btn-n">${fNum(missing)}</span></button>` : ''}
             <button class="btn" data-act="open-show-folder" title="Open this show's folder in your file manager">${ico('folder')}Open folder</button>
             ${s.anilist_id ? h`<a class="btn btn-ghost" href="https://anilist.co/anime/${Number(s.anilist_id)}" target="_blank" rel="noopener noreferrer">${ico('external')}AniList</a>` : ''}
             ${menu('show-more', `More actions for ${showTitle(s)}`, h`
               <button type="button" class="menu-item" data-act="refresh-show">${ico('refresh')}Refresh from AniList</button>
+              ${failedN ? h`<button type="button" class="menu-item" data-act="clear-failed">${ico('x')}Clear failed releases <span class="menu-sub">${plural(failedN, 'release')}</span></button>` : ''}
               <div class="menu-field"><label for="list-status">List</label>
                 <select class="select select-sm" id="list-status">${LIST_TABS.map(([k, l]) => h`<option value="${k}" ${s.list_status === k ? raw('selected') : ''}>${l}</option>`)}</select></div>
               <button type="button" class="menu-item is-danger" data-act="remove-show">${ico('trash')}Remove show</button>`, 'btn')}
@@ -853,12 +881,14 @@
       const items = [
         !f && cands.length && !active ? h`<button type="button" class="menu-item" data-act="add-release" data-release="${cands[0].id}">${ico('download')}Add best release <span class="menu-sub">${relDesc(cands[0])} · ${fNum(cands[0].seeders ?? 0)} seeders</span></button>` : '',
         active ? h`<button type="button" class="menu-item" data-act="skip-release" data-release="${cur.id}" data-show="${s.id}" data-ep="${n}" aria-label="Skip the current release for episode ${n} and stop auto-downloading it">${ico('x')}Skip this release</button>` : '',
+        // SPEC-v1.3 2.3: the red Failed chip goes away (release -> skipped); auto flags stay as they are
+        cur && cur.status === 'failed' ? h`<button type="button" class="menu-item" data-act="clear-failed-ep" data-ep="${n}" aria-label="Clear the failed release for episode ${n}">${ico('x')}Clear</button>` : '',
         !f && !active ? autoItem(e) : '',
         magnet ? h`<a class="menu-item" href="${magnet}" aria-label="Open magnet link for episode ${n}">${ico('magnet')}Open magnet link</a>` : '',
         f ? h`<button type="button" class="menu-item" data-act="reveal" data-file="${f.id}" aria-label="Show episode ${n} in folder">${ico('folder')}Reveal file</button>` : '',
       ].filter(Boolean);
       const row = h`<tr class="ep-row ${isNext ? 'is-next' : ''} ${e.watched_at ? 'is-watched' : ''}" id="ep-${n}">
-        <td class="c-n num">${n}</td>
+        <td class="c-n num">${n}${e.abs_number != null ? h`<div class="sub dim">${e.abs_number}</div>` : ''}</td>
         <td class="c-aired">${e.aired_at ? h`<span title="${fFull(e.aired_at)}">${fAired(e.aired_at)}</span>` : h`<span class="dim">Unknown</span>`}${dubs && e.dub_aired_at ? h`<div class="sub dim" title="${fFull(e.dub_aired_at)}">Dub ${fAired(e.dub_aired_at)}</div>` : ''}</td>
         <td class="c-state"><div class="chips">${chips}</div></td>
         <td class="c-rel ${relText || cands.length ? '' : 'is-empty'}"><div class="rel-line">${relText ? h`<span class="ellipsis ${f ? 'mono' : ''}" title="${relTip}">${relText}</span>` : h`<span class="dim">—</span>`}
@@ -906,6 +936,8 @@
     const root = downloadDirOf(S.settings) || 'download folder';
     const sep = OS_WIN ? '\\' : '/';
     const overrides = ['search_query', 'group_order', 'resolution', 'folder'].filter((k) => s[k] != null && s[k] !== '' && !(Array.isArray(s[k]) && !s[k].length)).length + (s.episode_offset ? 1 : 0) + (s.auto_download != null ? 1 : 0) + (s.auto_from != null ? 1 : 0);
+    // SPEC-v1.3 1.5: the manual offset is edited as "absolute numbering starts at" (offset + 1); empty = AniList's value
+    const absPh = s.abs_offset != null ? String(s.abs_offset + 1) + ' (from AniList)' : 'unknown';
     const go = Array.isArray(s.group_order) ? s.group_order.join(', ') : typeof s.group_order === 'string' ? safeJsonList(s.group_order).join(', ') : '';
     const auto = s.auto_download == null ? '' : s.auto_download === true || s.auto_download === 1 ? 'on' : 'off';
     const defQuery = String(s.title_romaji || '').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
@@ -914,7 +946,7 @@
       <form id="show-form" novalidate>
         <div class="form-grid">
           <div class="field"><label for="ss-q">nyaa search text</label><input class="input" id="ss-q" name="search_query" value="${s.search_query || ''}" placeholder="${defQuery}" spellcheck="false" aria-describedby="ss-q-h"><p class="help" id="ss-q-h">Sent to nyaa.si. Empty = the romaji title.</p></div>
-          <div class="field"><label for="ss-off">Episode offset</label><input class="input" id="ss-off" name="episode_offset" type="number" step="1" inputmode="numeric" value="${s.episode_offset ?? 0}" aria-describedby="ss-off-h ss-off-e"><p class="help" id="ss-off-h">File number minus AniList number. Example: 12 when this season's episode 1 is released as "13".</p><p class="err" id="ss-off-e" aria-live="polite"></p></div>
+          <div class="field"><label for="ss-abs">Absolute numbering starts at</label><input class="input" id="ss-abs" name="abs_start" type="number" min="1" step="1" inputmode="numeric" value="${s.episode_offset ? s.episode_offset + 1 : ''}" placeholder="${absPh}" aria-describedby="ss-abs-h ss-abs-e"><p class="help" id="ss-abs-h">The number this show's first episode has when the whole series is counted from episode 1. Groups like SubsPlease number sequels that way. Empty = use AniList's prequel chain. Example: 171 means episode 3 is released as "173".</p><p class="err" id="ss-abs-e" aria-live="polite"></p></div>
           <div class="field"><label for="ss-go">Preferred groups</label><input class="input" id="ss-go" name="group_order" value="${go}" placeholder="${(g.group_order || []).join(', ')}" spellcheck="false" aria-describedby="ss-go-h"><p class="help" id="ss-go-h">Comma separated, best first. Empty = global order.</p></div>
           <div class="field"><label for="ss-res">Resolution</label><select class="select" id="ss-res" name="resolution" aria-describedby="ss-res-h">
             <option value="">Global (${g.resolution || '1080p'})</option>${['2160p', '1080p', '720p', '480p'].map((r) => h`<option value="${r}" ${s.resolution === r ? raw('selected') : ''}>${r}</option>`)}</select><p class="help" id="ss-res-h">Releases at other resolutions are ignored.</p></div>
@@ -931,9 +963,10 @@
   function bindShowSettings(root, show, id) {
     const form = $('#show-form', root);
     if (!form) return;
-    const off = form.elements.episode_offset;
-    const offErr = $('#ss-off-e', root);
-    const checkOff = () => { const ok = /^-?\d+$/.test(off.value.trim()); offErr.textContent = ok ? '' : 'Whole number, for example 0 or 12.'; off.setAttribute('aria-invalid', String(!ok)); return ok; };
+    // SPEC-v1.3 1.5: "Absolute numbering starts at" = episode_offset + 1; empty = 0 (use AniList's prequel chain).
+    const off = form.elements.abs_start;
+    const offErr = $('#ss-abs-e', root);
+    const checkOff = () => { const v = off.value.trim(); const ok = v === '' || (/^\d+$/.test(v) && Number(v) >= 1); offErr.textContent = ok ? '' : 'Whole number 1 or more, or empty for automatic.'; off.setAttribute('aria-invalid', String(!ok)); return ok; };
     off.addEventListener('input', checkOff);
     const from = form.elements.auto_from;
     const fromErr = $('#ss-from-e', root);
@@ -947,7 +980,7 @@
       const groups = el.group_order.value.split(',').map((x) => x.trim()).filter(Boolean);
       const patch = {
         search_query: el.search_query.value.trim() || null,
-        episode_offset: Number(off.value.trim()),
+        episode_offset: off.value.trim() === '' ? 0 : Number(off.value.trim()) - 1,
         group_order: groups.length ? groups : null,
         resolution: el.resolution.value || null,
         auto_download: el.auto_download.value === '' ? null : el.auto_download.value === 'on',
@@ -1351,7 +1384,8 @@
       const s = st.state || {};
       const row = (label, path, btn) => h`<div class="kv-row"><span class="kv-k">${label}</span><span class="kv-v mono" title="${path || ''}">${path || h`<span class="dim">unknown (older server)</span>`}</span>${path ? h`<button type="button" class="btn btn-sm" data-act="open-dir" data-dir="${path}">${ico('folder')}${btn}</button>` : ''}</div>`;
       return h`<div class="kv-rows">${row('Data folder', s.data_dir, 'Open data folder')}${row('ABC\'s folder', s.exe_dir, 'Open ABC\'s folder')}</div>
-        <p class="small muted" style="margin:8px 0 16px">The data folder holds settings and the database. Create a folder named <code>data</code> next to abc.exe to keep everything portable.</p>`;
+        <p class="small muted" style="margin:8px 0 16px">The data folder holds settings and the database. Create a folder named <code>data</code> next to abc.exe to keep everything portable.</p>
+        <div class="row quit-row"><button type="button" class="btn btn-danger" data-act="quit-abc">${ico('power')}Quit ABC</button></div>`;
     };
     const topHtml = (sec) => {
       if (sec.top === 'folders') return ABC.Folders ? ABC.Folders.managerHtml(st.folders, st.foldersErr) : '';
@@ -1581,6 +1615,18 @@
       if (r.changed) rerender();
     },
     async 'open-dir'(btn, ds) { await API.openFolder(ds.dir); toast('Opened the folder', 'ok'); },
+    // Settings > Server > Quit ABC: the only way to stop abcw.exe, which has no console window.
+    async 'quit-abc'() {
+      const { ok } = await confirmBox({
+        title: 'Quit ABC?',
+        body: h`<p>Downloads in your torrent app keep running; nothing new is picked up until you start ABC again.</p>`,
+        ok: 'Quit ABC',
+        danger: true,
+      });
+      if (!ok) return;
+      await API.quit();
+      quitScreen();
+    },
     async 'retry-state'() {
       const st = await API.state();
       S.state = st;
@@ -1916,11 +1962,25 @@
   }
   /** Keep S.showsById (global search, drawer show names) current on pages that do not load /api/shows. */
   const refreshShowIndex = debounce(async () => { const r = await soft(API.shows(), null); if (r.v) indexShows(r.v); }, 800);
+  let sse = null; // the live EventSource (closed by Quit ABC)
+  /** After Quit ABC: close the event stream (no reconnect) and cover the page with the note. */
+  function quitScreen() {
+    S.quit = true;
+    if (sse) { sse.close(); sse = null; }
+    document.title = 'ABC has quit';
+    const el = document.createElement('div');
+    el.className = 'quit-screen';
+    el.setAttribute('role', 'alert');
+    el.innerHTML = String(h`<div class="quit-card surface">${ico('power')}<p>ABC has quit. Close this tab.</p></div>`);
+    document.body.appendChild(el);
+  }
   function connectSSE() {
+    if (S.quit) return;
     if (typeof EventSource === 'undefined') { setLive('down'); return; }
     let es;
     let hadError = false;
     try { es = new EventSource('/api/events/stream'); } catch { setLive('down'); return; }
+    sse = es;
     es.onopen = async () => {
       setLive('live');
       if (hadError && S.lastEventId) { // catch up on what was missed while disconnected
@@ -1928,7 +1988,10 @@
       }
       hadError = false;
     };
-    es.onerror = () => { hadError = true; setLive(es.readyState === 2 ? 'down' : 'connecting'); if (es.readyState === 2) setTimeout(connectSSE, 5000); };
+    es.onerror = () => {
+      if (S.quit) { es.close(); return; } // the server went away on purpose: no reconnect
+      hadError = true; setLive(es.readyState === 2 ? 'down' : 'connecting'); if (es.readyState === 2) setTimeout(connectSSE, 5000);
+    };
     for (const k of EVENT_KINDS) es.addEventListener(k, (e) => onEvent(k, e.data));
     es.addEventListener('ping', () => { if (liveState !== 'live') setLive('live'); });
     es.onmessage = (e) => onEvent(null, e.data);
@@ -1977,7 +2040,7 @@
     // v1.2 (home.js, shows.js, drawer.js)
     showTitle, mediaTitle, progressOf, progBar, fWhen, fRel, fTime, fFull, fAired, F, safeUrl, isHex, readableAccent, nowSec,
     STATUS_LABEL, FORMAT_LABEL, pretty, LIST_TABS, indexShows, touchShow, weekStart, weekDays, dayKey, toDate, calChips, calState, weekEntry,
-    needsSetup, setupTodo, lowDisk, driveOf, GIB, liveLabel, paintStatus, focusFirst, downloadMissingFlow,
+    needsSetup, setupTodo, lowDisk, driveOf, GIB, liveLabel, paintStatus, focusFirst, downloadMissingFlow, epNum, effOffset,
     current: () => current,
   };
   for (const ext of window.ABC_EXT || []) { try { ext(ABC); } catch (err) { console.error('[ABC] extension failed', err); } }

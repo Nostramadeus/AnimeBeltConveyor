@@ -25,7 +25,7 @@ func (s *Sched) conveyorRun(ctx context.Context, only int64) error {
 	if err != nil {
 		return err
 	}
-	titles := Titles(shows)
+	titles := s.titles(ctx, shows)
 	byID := map[int64]store.Show{}
 	for _, sh := range shows {
 		byID[sh.ID] = sh
@@ -72,11 +72,10 @@ func (s *Sched) storeCandidates(ctx context.Context, c settings.Settings, items 
 			continue
 		}
 		r := s.brain.Parse(it.Title)
-		sid, ep, ok, _ := s.brain.Match(r, titles)
+		sid, ep, ok, _, shift := s.brain.Match(r, titles)
 		if !ok {
 			continue
 		}
-		sh := byID[int64(sid)]
 		rel := store.Release{
 			ShowID: int64(sid), NyaaID: it.ID, Title: it.Title, InfoHash: strings.ToLower(it.InfoHash),
 			TorrentURL: it.TorrentURL, ReleaseGroup: r.Group, Resolution: r.Resolution, Version: max(r.Version, 1),
@@ -93,7 +92,8 @@ func (s *Sched) storeCandidates(ctx context.Context, c settings.Settings, items 
 			rel.Episode = store.Ptr(ep)
 		}
 		if r.IsBatch && r.EpisodeEnd > 0 {
-			rel.EpisodeEnd = store.Ptr(r.EpisodeEnd - sh.EpisodeOffset)
+			// the range end is read the same way as its start (SPEC v1.3 section 1.3)
+			rel.EpisodeEnd = store.Ptr(r.EpisodeEnd - shift)
 		}
 		if s.brain.IsRecap(r) {
 			rel.StatusNote = "recap"

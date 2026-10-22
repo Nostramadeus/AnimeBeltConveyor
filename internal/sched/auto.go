@@ -18,12 +18,12 @@ import (
 const (
 	AutoTurnedOff = "turned off"
 	AutoNoAirDate = "no air date"
-	AutoRemoved   = "removed from qBittorrent"
+	AutoRemoved   = "removed in qBittorrent"
 )
 
 // noteRemoved is the status note of a release whose torrent the user removed
-// in qBittorrent.
-const noteRemoved = "removed from qBittorrent"
+// in qBittorrent (status skipped since v1.3; migrate_3.sql renames old rows).
+const noteRemoved = "removed in qBittorrent"
 
 // ErrBadAuto is returned by SetEpisodeAuto for a value other than nil, 0 or 1.
 var ErrBadAuto = errors.New("auto must be null, 0 or 1")
@@ -86,8 +86,8 @@ func NewAutoContext(c settings.Settings, sh store.Show, eps []store.Episode, now
 // rule or the rule does not matter (not aired yet, a present file, an active
 // release, or watched without a file, which the conveyor never fetches);
 // otherwise why the conveyor leaves it alone. "turned off" becomes
-// "removed from qBittorrent" when the latest handed-off release of the episode
-// failed because its torrent was removed.
+// "removed in qBittorrent" when the latest handed-off release of the episode
+// was skipped because its torrent was removed.
 func (a AutoContext) Reason(e store.Episode, hasFile bool, rels []store.Release) string {
 	if hasFile || e.WatchedAt != nil || !aired(e, a.sh, a.now, a.maxAired) {
 		return ""
@@ -109,7 +109,7 @@ func (a AutoContext) Reason(e store.Episode, hasFile bool, rels []store.Release)
 	if ok {
 		return ""
 	}
-	if why == AutoTurnedOff && latest != nil && latest.Status == store.RelFailed && strings.HasPrefix(latest.StatusNote, noteRemoved) {
+	if why == AutoTurnedOff && latest != nil && latest.Status == store.RelSkipped && strings.HasPrefix(latest.StatusNote, noteRemoved) {
 		return AutoRemoved
 	}
 	return why

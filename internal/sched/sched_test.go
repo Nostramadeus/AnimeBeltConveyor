@@ -33,6 +33,10 @@ type fakeBrain struct {
 	torrent    []byte // FetchTorrent body
 	torrentErr error
 	fetched    []string // URLs passed to FetchTorrent
+
+	prequels     map[int]prequelHop // Prequel answers by AniList id (v13_test.go)
+	prequelErr   error
+	prequelCalls []int
 }
 
 func (f *fakeBrain) FetchTorrent(_ context.Context, url string) ([]byte, error) {
@@ -444,8 +448,8 @@ func TestConveyorPicksPreferredGroupAndAdds(t *testing.T) {
 	if err := e.s.qbitRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := e.db.GetRelease(ctx, added.ID); r.Status != store.RelFailed {
-		t.Fatalf("unknown hash should fail, got %s", r.Status)
+	if r, _ := e.db.GetRelease(ctx, added.ID); r.Status != store.RelSkipped || r.StatusNote != "removed in qBittorrent" {
+		t.Fatalf("unknown hash (removed in qBittorrent) should be skipped, got %s %q", r.Status, r.StatusNote)
 	}
 	e.db.SetReleaseQbit(ctx, added.ID, store.RelAdded, h2, "")
 	q.state[h2] = 0.5

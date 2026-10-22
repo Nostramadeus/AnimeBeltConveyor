@@ -30,7 +30,7 @@ type exp struct {
 
 func run(t *testing.T, name string, list []ShowTitles, w exp) float64 {
 	t.Helper()
-	id, ep, ok, score := Match(parse.Parse(name), list)
+	id, ep, ok, score, _ := Match(parse.Parse(name), list)
 	if id != w.id || ep != w.ep || ok != w.ok {
 		t.Errorf("Match(%q) = id %d ep %d ok %v score %.3f; want id %d ep %d ok %v", name, id, ep, ok, score, w.id, w.ep, w.ok)
 	}

@@ -38,3 +38,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 & $go build -ldflags "-X main.version=$version" -o abc.exe ./cmd/abc
 if ($LASTEXITCODE -ne 0) { Write-Error 'go build failed'; exit 1 }
 Write-Host "built abc.exe ($version)"
+# abcw.exe: the same program without a console window (quiet start; logs go to abc.log).
+& $go build -ldflags "-X main.version=$version -H windowsgui" -o abcw.exe ./cmd/abc
+if ($LASTEXITCODE -ne 0) { Write-Error 'go build (abcw) failed'; exit 1 }
+Write-Host "built abcw.exe ($version, no console window)"

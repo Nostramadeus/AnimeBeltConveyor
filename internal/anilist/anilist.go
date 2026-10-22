@@ -53,6 +53,19 @@ type Media struct {
 	Synonyms    []string     `json:"synonyms"`
 	DurationMin int          `json:"duration_min"`
 	Airing      []AiringNode `json:"airing"`
+	// Prequel is the TV / TV_SHORT / ONA entry this show directly follows
+	// (pickPrequel); nil = none (SPEC v1.3 section 1.2).
+	Prequel *RelNode `json:"prequel"`
+}
+
+// RelNode is one related anime of the prequel chain. StartDate is yyyymmdd as
+// a sortable number (20231001), 0 = unknown.
+type RelNode struct {
+	ID         int    `json:"id"`
+	Format     string `json:"format"`
+	Episodes   int    `json:"episodes"` // 0 = unknown
+	SeasonYear int    `json:"season_year"`
+	StartDate  int64  `json:"start_date"`
 }
 
 // AiringNode is one airingSchedule entry. AiringAt is unix seconds UTC.
@@ -161,12 +174,23 @@ func (c *Client) take(ctx context.Context) error {
 
 const mediaFields = `id idMal title { romaji english native } coverImage { extraLarge color } bannerImage format status season seasonYear episodes averageScore nextAiringEpisode { episode airingAt }`
 
+// relationFields are the related-media fields the prequel chain needs.
+const relationFields = `relations { edges { relationType node { id type format episodes seasonYear startDate { year month day } } } }`
+
 // QueryMedia is used for Media and MediaByMalID; variables id or idMal, page.
+// relations are sent on every page; only page 1's are read.
 const QueryMedia = `query ($id: Int, $idMal: Int, $page: Int) {
   Media(id: $id, idMal: $idMal, type: ANIME) {
     ` + mediaFields + ` synonyms duration
+    ` + relationFields + `
     airingSchedule(page: $page, perPage: 50) { pageInfo { hasNextPage } nodes { episode airingAt } }
   }
+}`
+
+// QueryRelations fetches one media's episode count and relations (one
+// request, no airing schedule): one hop of the prequel chain.
+const QueryRelations = `query ($id: Int) {
+  Media(id: $id, type: ANIME) { id episodes ` + relationFields + ` }
 }`
 
 // QuerySearch: Page(perPage:25){media(search:$q,type:ANIME)}. 25 so a franchise
@@ -227,6 +251,75 @@ type rawMedia struct {
 		PageInfo pageInfo     `json:"pageInfo"`
 		Nodes    []AiringNode `json:"nodes"`
 	} `json:"airingSchedule"`
+	Relations *struct {
+		Edges []rawEdge `json:"edges"`
+	} `json:"relations"`
+}
+
+// rawEdge is one relations edge. Null numbers decode as 0.
+type rawEdge struct {
+	RelationType string `json:"relationType"`
+	Node         struct {
+		ID         int    `json:"id"`
+		Type       string `json:"type"`
+		Format     string `json:"format"`
+		Episodes   int    `json:"episodes"`
+		SeasonYear int    `json:"seasonYear"`
+		StartDate  struct {
+			Year  int `json:"year"`
+			Month int `json:"month"`
+			Day   int `json:"day"`
+		} `json:"startDate"`
+	} `json:"node"`
+}
+
+func (r *rawMedia) edges() []rawEdge {
+	if r.Relations == nil {
+		return nil
+	}
+	return r.Relations.Edges
+}
+
+// pickPrequel selects the prequel a show directly follows: among PREQUEL edges
+// to an ANIME of format TV, TV_SHORT or ONA (movies, OVAs, specials and
+// non-anime are never part of the chain), the one with the greatest start
+// date; when dates tie, or when any candidate's start date is unknown, the
+// greatest id. nil when there is no such edge.
+func pickPrequel(edges []rawEdge) *RelNode {
+	var cands []RelNode
+	unknown := false
+	for _, e := range edges {
+		n := e.Node
+		if e.RelationType != "PREQUEL" || n.Type != "ANIME" {
+			continue
+		}
+		if n.Format != "TV" && n.Format != "TV_SHORT" && n.Format != "ONA" {
+			continue
+		}
+		rn := RelNode{ID: n.ID, Format: n.Format, Episodes: n.Episodes, SeasonYear: n.SeasonYear}
+		if n.StartDate.Year > 0 {
+			rn.StartDate = int64(n.StartDate.Year)*10000 + int64(n.StartDate.Month)*100 + int64(n.StartDate.Day)
+		} else {
+			unknown = true
+		}
+		cands = append(cands, rn)
+	}
+	if len(cands) == 0 {
+		return nil
+	}
+	best := cands[0]
+	for _, c := range cands[1:] {
+		if !unknown && c.StartDate != best.StartDate {
+			if c.StartDate > best.StartDate {
+				best = c
+			}
+			continue
+		}
+		if c.ID > best.ID {
+			best = c
+		}
+	}
+	return &best
 }
 
 type pageInfo struct {
@@ -306,6 +399,7 @@ func (c *Client) media(ctx context.Context, vars map[string]any) (Media, error) 
 				m.Synonyms = []string{}
 			}
 			m.DurationMin = r.Duration
+			m.Prequel = pickPrequel(r.edges())
 			// later pages by AniList id, even when the lookup was by idMal
 			delete(vars, "idMal")
 			vars["id"] = r.ID
@@ -319,6 +413,22 @@ func (c *Client) media(ctx context.Context, vars map[string]any) (Media, error) 
 		}
 	}
 	return m, nil
+}
+
+// Prequel fetches one media by AniList id with QueryRelations (one request)
+// and returns its own episode count (0 = unknown) and its prequel (nil = none).
+// One hop of the prequel chain (SPEC v1.3 section 1.2).
+func (c *Client) Prequel(ctx context.Context, id int) (episodes int, prequel *RelNode, err error) {
+	var out struct {
+		Media *rawMedia `json:"Media"`
+	}
+	if err := c.query(ctx, "", QueryRelations, map[string]any{"id": id}, &out); err != nil {
+		return 0, nil, err
+	}
+	if out.Media == nil {
+		return 0, nil, &Error{Status: http.StatusNotFound, Messages: []string{"media not found"}}
+	}
+	return out.Media.Episodes, pickPrequel(out.Media.edges()), nil
 }
 
 // Season returns every TV, TV_SHORT and ONA anime of a season (WINTER,

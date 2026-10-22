@@ -79,13 +79,18 @@ func SavePath(c settings.Settings, s store.Show) string {
 	return filepath.Join(dl, SafeName(s.TitleRomaji))
 }
 
-// Titles converts shows to the matcher's input.
-func Titles(shows []store.Show) []ShowTitles {
+// Titles converts shows to the matcher's input. known is the highest episode
+// number per show id (store.MaxEpisodeNumbers; nil = none known).
+func Titles(shows []store.Show, known map[int64]int) []ShowTitles {
 	out := make([]ShowTitles, 0, len(shows))
 	for _, s := range shows {
 		t := ShowTitles{
 			ID: int(s.ID), Romaji: s.TitleRomaji, English: s.TitleEnglish, Native: s.TitleNative,
 			Synonyms: s.Synonyms, SearchQuery: s.SearchQuery, EpisodeOffset: s.EpisodeOffset, ListStatus: s.ListStatus,
+			EpisodesKnown: known[s.ID],
+		}
+		if s.AbsOffset != nil && *s.AbsOffset > 0 { // -1 = chain unknown: no offset
+			t.AbsOffset = *s.AbsOffset
 		}
 		if s.EpisodesTotal != nil {
 			t.EpisodesTotal = *s.EpisodesTotal

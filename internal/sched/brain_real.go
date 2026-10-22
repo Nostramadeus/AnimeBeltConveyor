@@ -33,7 +33,7 @@ func (OfflineBrain) Parse(name string) ParseResult { return ParseResult(parse.Pa
 
 func (OfflineBrain) IsRecap(r ParseResult) bool { return parse.Result(r).IsRecap() }
 
-func (OfflineBrain) Match(r ParseResult, shows []ShowTitles) (int, int, bool, float64) {
+func (OfflineBrain) Match(r ParseResult, shows []ShowTitles) (int, int, bool, float64, int) {
 	in := make([]match.ShowTitles, len(shows))
 	for i, s := range shows {
 		in[i] = match.ShowTitles(s)
@@ -89,6 +89,7 @@ func (OfflineBrain) NyaaSearch(context.Context, string, string, string) ([]NyaaI
 }
 func (OfflineBrain) Search(context.Context, string) ([]MediaSummary, error) { return nil, ErrOffline }
 func (OfflineBrain) Media(context.Context, int) (Media, error)              { return Media{}, ErrOffline }
+func (OfflineBrain) Prequel(context.Context, int) (int, *RelNode, error)    { return 0, nil, ErrOffline }
 func (OfflineBrain) MediaByMAL(context.Context, int) (Media, error)         { return Media{}, ErrOffline }
 func (OfflineBrain) Season(context.Context, string, int) ([]MediaSummary, error) {
 	return nil, ErrOffline
@@ -166,7 +167,7 @@ func summaries(in []anilist.MediaSummary) []MediaSummary {
 }
 
 func mediaOf(m anilist.Media) Media {
-	out := Media{MediaSummary: summaryOf(m.MediaSummary), Synonyms: m.Synonyms}
+	out := Media{MediaSummary: summaryOf(m.MediaSummary), Synonyms: m.Synonyms, Prequel: relNodeOf(m.Prequel)}
 	out.Duration = m.DurationMin
 	for _, a := range m.Airing {
 		out.Airing = append(out.Airing, AiringNode{Episode: a.Episode, AiringAt: a.AiringAt})
@@ -185,6 +186,22 @@ func (b *RealBrain) Media(ctx context.Context, id int) (Media, error) {
 		return Media{}, err
 	}
 	return mediaOf(m), nil
+}
+
+func relNodeOf(p *anilist.RelNode) *RelNode {
+	if p == nil {
+		return nil
+	}
+	r := RelNode(*p)
+	return &r
+}
+
+func (b *RealBrain) Prequel(ctx context.Context, id int) (int, *RelNode, error) {
+	eps, p, err := b.al.Prequel(ctx, id)
+	if err != nil {
+		return 0, nil, err
+	}
+	return eps, relNodeOf(p), nil
 }
 
 func (b *RealBrain) MediaByMAL(ctx context.Context, malID int) (Media, error) {

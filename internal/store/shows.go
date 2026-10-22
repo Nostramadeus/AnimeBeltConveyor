@@ -36,8 +36,32 @@ type Show struct {
 	AutoDownload  *bool    `json:"auto_download"`
 	Folder        string   `json:"folder"`
 	AutoFrom      *int     `json:"auto_from"` // episodes below it are never auto-downloaded; nil = no floor (migrate_2)
-	AddedAt       int64    `json:"added_at"`
-	UpdatedAt     int64    `json:"updated_at"`
+	// AbsOffset is the number of episodes before this show in its series, from
+	// AniList's prequel chain (migrate_3): nil = not computed yet, -1 = computed
+	// but the chain is unknown, 0 = no prequel. EpisodeOffset stays the manual override.
+	AbsOffset *int  `json:"abs_offset"`
+	AddedAt   int64 `json:"added_at"`
+	UpdatedAt int64 `json:"updated_at"`
+}
+
+// EffectiveOffset is the offset between release numbering and AniList
+// numbering used everywhere (SPEC v1.3 section 1.1): the manual EpisodeOffset
+// when set, else the AniList-derived AbsOffset when it is above 0, else 0
+// (an AbsOffset <= 0, including -1 = chain unknown, is no offset).
+func EffectiveOffset(s Show) int {
+	if s.EpisodeOffset != 0 {
+		return s.EpisodeOffset
+	}
+	if s.AbsOffset != nil && *s.AbsOffset > 0 {
+		return *s.AbsOffset
+	}
+	return 0
+}
+
+// SetAbsOffset writes only abs_offset (the periodic backfill of shows the
+// airing refresh skips).
+func (d *DB) SetAbsOffset(ctx context.Context, id int64, abs *int) error {
+	return d.exec1(ctx, `UPDATE shows SET abs_offset=? WHERE id=?`, nint(abs), id)
 }
 
 // ListStatuses are the valid values of shows.list_status.
@@ -46,17 +70,17 @@ var ListStatuses = []string{"watching", "planning", "completed", "paused", "drop
 const showCols = `id, anilist_id, mal_id, title_romaji, title_english, title_native, synonyms,
 	cover_url, banner_url, color, format, status, season, season_year, episodes_total, duration_min,
 	next_airing_ep, next_airing_at, list_status, score, search_query, episode_offset, group_order,
-	resolution, auto_download, folder, auto_from, added_at, updated_at`
+	resolution, auto_download, folder, auto_from, abs_offset, added_at, updated_at`
 
 func scanShow(r scanner) (Show, error) {
 	var s Show
-	var anilist, mal, seasonYear, epTotal, dur, nextEp, nextAt, auto, autoFrom sql.NullInt64
+	var anilist, mal, seasonYear, epTotal, dur, nextEp, nextAt, auto, autoFrom, absOffset sql.NullInt64
 	var eng, native, syn, cover, banner, color, format, status, season, query, groups, res, folder sql.NullString
 	var score sql.NullFloat64
 	err := r.Scan(&s.ID, &anilist, &mal, &s.TitleRomaji, &eng, &native, &syn,
 		&cover, &banner, &color, &format, &status, &season, &seasonYear, &epTotal, &dur,
 		&nextEp, &nextAt, &s.ListStatus, &score, &query, &s.EpisodeOffset, &groups,
-		&res, &auto, &folder, &autoFrom, &s.AddedAt, &s.UpdatedAt)
+		&res, &auto, &folder, &autoFrom, &absOffset, &s.AddedAt, &s.UpdatedAt)
 	if err != nil {
 		return s, err
 	}
@@ -78,6 +102,7 @@ func scanShow(r scanner) (Show, error) {
 	s.AutoDownload = ptrBool(auto)
 	s.Folder = folder.String
 	s.AutoFrom = ptrInt(autoFrom)
+	s.AbsOffset = ptrInt(absOffset)
 	return s, nil
 }
 
@@ -96,12 +121,12 @@ func (d *DB) CreateShow(ctx context.Context, s *Show) error {
 	if s.Synonyms == nil {
 		s.Synonyms = []string{}
 	}
-	res, err := d.db.ExecContext(ctx, `INSERT INTO shows(`+showCols[4:]+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	res, err := d.db.ExecContext(ctx, `INSERT INTO shows(`+showCols[4:]+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		nid(s.AniListID), nid(s.MALID), s.TitleRomaji, nstr(s.TitleEnglish), nstr(s.TitleNative), jsonList(s.Synonyms),
 		nstr(s.CoverURL), nstr(s.BannerURL), nstr(s.Color), nstr(s.Format), nstr(s.Status), nstr(s.Season),
 		nint(s.SeasonYear), nint(s.EpisodesTotal), nint(s.DurationMin), nint(s.NextAiringEp), nint64(s.NextAiringAt),
 		s.ListStatus, nfloat(s.Score), nstr(s.SearchQuery), s.EpisodeOffset, njsonList(s.GroupOrder),
-		nstr(s.Resolution), nbool(s.AutoDownload), nstr(s.Folder), nint(s.AutoFrom), s.AddedAt, s.UpdatedAt)
+		nstr(s.Resolution), nbool(s.AutoDownload), nstr(s.Folder), nint(s.AutoFrom), nint(s.AbsOffset), s.AddedAt, s.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -152,7 +177,8 @@ func (d *DB) ListShows(ctx context.Context, listStatus string) ([]Show, error) {
 	return out, rows.Err()
 }
 
-// UpdateShowMeta writes the AniList-derived columns of s (not the user's overrides).
+// UpdateShowMeta writes the AniList-derived columns of s (not the user's
+// overrides), abs_offset included.
 func (d *DB) UpdateShowMeta(ctx context.Context, s *Show) error {
 	s.UpdatedAt = Now()
 	if s.Synonyms == nil {
@@ -160,11 +186,11 @@ func (d *DB) UpdateShowMeta(ctx context.Context, s *Show) error {
 	}
 	return d.exec1(ctx, `UPDATE shows SET anilist_id=?, mal_id=?, title_romaji=?, title_english=?, title_native=?, synonyms=?,
 		cover_url=?, banner_url=?, color=?, format=?, status=?, season=?, season_year=?, episodes_total=?, duration_min=?,
-		next_airing_ep=?, next_airing_at=?, updated_at=? WHERE id=?`,
+		next_airing_ep=?, next_airing_at=?, abs_offset=?, updated_at=? WHERE id=?`,
 		nid(s.AniListID), nid(s.MALID), s.TitleRomaji, nstr(s.TitleEnglish), nstr(s.TitleNative), jsonList(s.Synonyms),
 		nstr(s.CoverURL), nstr(s.BannerURL), nstr(s.Color), nstr(s.Format), nstr(s.Status), nstr(s.Season),
 		nint(s.SeasonYear), nint(s.EpisodesTotal), nint(s.DurationMin), nint(s.NextAiringEp), nint64(s.NextAiringAt),
-		s.UpdatedAt, s.ID)
+		nint(s.AbsOffset), s.UpdatedAt, s.ID)
 }
 
 // UpdateShowPrefs writes the user-editable columns of s (list status, score, overrides).

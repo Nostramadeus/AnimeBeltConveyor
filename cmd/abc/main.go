@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,6 +33,11 @@ var version = "dev"
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "abc:", err)
+		slog.Error("exit", "err", err)
+		if !hasConsole() {
+			// abcw.exe (quiet start, no console window): the user would never see stderr.
+			fatalBox(err.Error() + "\n\nDetails are in abc.log in the data folder.")
+		}
 		os.Exit(1)
 	}
 }
@@ -62,6 +68,17 @@ func dataDir(flagValue, exeDir string, userConfigDir func() (string, error)) (di
 		return "", "", fmt.Errorf("no config folder for this user (use --data, or create a data folder next to abc.exe): %w", err)
 	}
 	return filepath.Join(base, "abc"), srcUser, nil
+}
+
+// alreadyRunning reports whether another ABC answers at url (GET /api/state is 200).
+func alreadyRunning(url string) bool {
+	c := &http.Client{Timeout: 2 * time.Second}
+	resp, err := c.Get(url + "api/state")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK && resp.Header.Get("Content-Type") != "" && strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json")
 }
 
 // exeDir is the folder of the running executable ("" when unknown).
@@ -122,7 +139,19 @@ func run() error {
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("cannot listen on %s (is ABC already running?): %w", addr, err)
+		url := "http://" + addr + "/"
+		if alreadyRunning(url) {
+			// A second double-click on abc.exe / abcw.exe: show the running instance instead of failing.
+			slog.Info("already running, opening the existing window", "url", url)
+			fmt.Println("ABC is already running at " + url)
+			if !*noBrowser {
+				if err := sched.OpenURL(url); err != nil {
+					slog.Warn("could not open the browser", "err", err)
+				}
+			}
+			return nil
+		}
+		return fmt.Errorf("cannot listen on %s (another program uses the port; change Settings > Server > port or run with --port): %w", addr, err)
 	}
 
 	apiSrv := api.New(db, set, ev, sch, web.FS)
@@ -161,6 +190,8 @@ func run() error {
 	select {
 	case <-sig.Done():
 		slog.Info("shutting down")
+	case <-apiSrv.Quit(): // Settings > Quit ABC (abcw.exe has no console to press Ctrl-C in)
+		slog.Info("quit from the web UI, shutting down")
 	case err := <-serveErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err

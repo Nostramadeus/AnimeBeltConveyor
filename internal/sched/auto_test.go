@@ -262,16 +262,25 @@ func TestRemovedFromQbitTurnsAutoOff(t *testing.T) {
 		t.Fatalf("errored torrent must not turn auto off: %v", *ep2.Auto)
 	}
 	evs, _ := e.db.ListEvents(ctx, 0, 100)
-	var msgs []string
+	var failed, skipped []string
 	for _, ev := range evs {
-		if ev.Kind == events.DownloadFailed {
-			msgs = append(msgs, ev.Message)
+		switch ev.Kind {
+		case events.DownloadFailed:
+			failed = append(failed, ev.Message)
+		case events.ReleaseSkipped:
+			skipped = append(skipped, ev.Message)
 		}
 	}
-	joined := strings.Join(msgs, "\n")
-	if !strings.Contains(joined, "Frieren ep 1: torrent is no longer in qBittorrent; not downloading it again (press Add to retry)") ||
-		!strings.Contains(joined, "Frieren ep 2: qBittorrent reports error") {
-		t.Fatalf("download.failed messages = %q", msgs)
+	// SPEC v1.3 section 2.1: removed in the client = release.skipped, not download.failed.
+	if !strings.Contains(strings.Join(skipped, "\n"), "Frieren ep 1: torrent is no longer in qBittorrent; not downloading it again (press Add to retry)") ||
+		strings.Join(failed, "\n") != "Frieren ep 2: qBittorrent reports error" {
+		t.Fatalf("release.skipped = %q, download.failed = %q", skipped, failed)
+	}
+	if rels, _ := e.db.ListReleases(ctx, sh.ID, store.Ptr(1)); len(rels) != 1 || rels[0].Status != store.RelSkipped || rels[0].StatusNote != "removed in qBittorrent" {
+		t.Fatalf("removed release = %+v", rels)
+	}
+	if rels, _ := e.db.ListReleases(ctx, sh.ID, store.Ptr(2)); len(rels) != 1 || rels[0].Status != store.RelFailed {
+		t.Fatalf("errored release = %+v", rels)
 	}
 	if r := reasons(t, e, sh); r[1] != AutoRemoved || r[2] != "" {
 		t.Fatalf("reasons = %v", r)

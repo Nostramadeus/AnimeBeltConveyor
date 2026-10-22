@@ -298,6 +298,12 @@ code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; f
 .btn-ghost:hover { color: var(--fg); background: rgba(255, 255, 255, .07); }
 .btn-danger { color: #ffd9d9; border-color: rgba(244, 120, 120, .45); background: rgba(244, 120, 120, .12); }
 .btn-danger:hover { background: rgba(244, 120, 120, .22); }
+/* Settings > Server > Quit ABC, and the note that covers the page afterwards */
+.quit-row { margin: 4px 0 22px; }
+.quit-screen { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: var(--bg); }
+.quit-card { display: grid; justify-items: center; gap: 14px; max-width: 420px; padding: 32px 28px; border-radius: 20px; text-align: center; }
+.quit-card .ico { width: 36px; height: 36px; color: var(--fg-2); }
+.quit-card p { margin: 0; font-size: 20px; font-weight: 650; line-height: 1.4; }
 .btn-sm { height: var(--tgt); padding: 0 13px; font-size: 14px; gap: 6px; }
 .btn-sm .ico { width: 17px; height: 17px; }
 .btn-lg { height: 48px; padding: 0 26px; font-size: 16px; gap: 10px; }
@@ -658,7 +664,9 @@ details.panel[open] > summary { margin-bottom: 16px; }
 .ep-table tr.is-watched td:not(.c-act) { opacity: .7; }
 /* dimmed rows: start from full-strength text so the 70 % result still reads >= 4.5:1 */
 .ep-table tr.is-watched .c-aired, .ep-table tr.is-watched .c-rel, .ep-table tr.is-watched .chip-dim, .ep-table tr.is-watched .dim { color: var(--fg); }
-.ep-table .c-n { width: 64px; font-weight: 720; font-size: 16px; }
+.ep-table .c-n { width: 64px; min-width: 64px; font-weight: 720; font-size: 16px; }
+/* SPEC-v1.3 1.5: the absolute number under the season number, 13 px and muted */
+.ep-table .c-n .sub { font-size: 13px; font-weight: 500; line-height: 1.25; white-space: nowrap; }
 .ep-table .c-aired { width: 190px; white-space: nowrap; color: var(--fg-2); font-size: 15px; }
 .ep-table .c-state { width: 236px; }
 .ep-table .chips { display: flex; gap: 6px; flex-wrap: wrap; }

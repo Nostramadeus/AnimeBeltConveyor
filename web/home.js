@@ -4,7 +4,7 @@
 'use strict';
 (window.ABC_EXT = window.ABC_EXT || []).push((ABC) => {
   const { $, $$, h, raw, ico, S, Views, API, soft, A, showTitle, progressOf, fNum, fFull, fRel, fWhen, fTime, F, safeUrl, isHex, readableAccent, nowSec, plural,
-    indexShows, touchShow, paintFromLast, weekStart, weekDays, dayKey, toDate, calChips, calState, needsSetup, setupTodo, lowDisk, driveOf, GIB, motionOK } = ABC;
+    indexShows, touchShow, paintFromLast, weekStart, weekDays, dayKey, toDate, calChips, calState, needsSetup, setupTodo, lowDisk, driveOf, GIB, motionOK, epNum } = ABC;
   const DAY = 86400;
   const MAX_NEEDS = 6;
   const colorVars = (c) => (isHex(c) ? raw(`style="--c:${c};--cc:${readableAccent(c).accent}"`) : '');
@@ -23,7 +23,7 @@
       <div class="up-hero-text">
         <div class="eyebrow"><span class="bar"></span>Up next</div>
         <h3 class="up-hero-title clamp2"><a href="#/show/${e.show_id}">${title}</a></h3>
-        <p class="up-ep"><b>Episode ${e.number}</b>${rel ? ` · ${rel}` : ''}</p>
+        <p class="up-ep"><b>Episode ${epNum(e.number, e.abs_number)}</b>${rel ? ` · ${rel}` : ''}</p>
         <p class="up-meta">${e.aired_at ? h`<span title="${fFull(e.aired_at)}">Aired ${fRel(e.aired_at)}</span>` : ''}${show.id ? h`<span>${fNum(g.watched)} of ${fNum(g.total || g.aired)} watched</span>` : ''}</p>
         <div class="up-acts">
           ${f ? h`<button class="btn btn-primary btn-lg" data-act="play" data-file="${f.id}" data-show="${e.show_id}" data-label="episode ${e.number}">${ico('play')}Play</button>` : ''}
@@ -41,7 +41,7 @@
     return h`<article class="up-card" role="listitem" ${colorVars(e.color || show.color)}>
       <a class="up-poster" href="#/show/${e.show_id}" tabindex="-1" aria-hidden="true"><img src="${safeUrl(e.cover_url || show.cover_url)}" alt="" loading="lazy"></a>
       <h3 class="up-title clamp2"><a href="#/show/${e.show_id}">${title}</a></h3>
-      <p class="up-ep">Episode ${e.number}${rel ? ` · ${rel}` : ''}</p>
+      <p class="up-ep">Episode ${epNum(e.number, e.abs_number)}${rel ? ` · ${rel}` : ''}</p>
       <div class="up-acts">
         ${f ? h`<button class="btn btn-primary up-play" data-act="play" data-file="${f.id}" data-show="${e.show_id}" data-label="episode ${e.number}" aria-label="Play ${title} episode ${e.number}">${ico('play')}Play</button>` : ''}
         <button class="btn btn-icon up-tick" data-act="watched" data-show="${e.show_id}" data-ep="${e.number}" data-val="1" aria-label="Mark ${title} episode ${e.number} watched" data-tip="Mark watched">${ico('check')}</button>

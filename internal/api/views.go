@@ -56,8 +56,9 @@ type ShowFull struct {
 	Resolution    string   `json:"resolution"`
 	AutoDownload  *bool    `json:"auto_download"`
 	Folder        string   `json:"folder"`
-	AutoFrom      *int     `json:"auto_from"` // episodes below it are never auto-downloaded; null = no floor
-	SavePath      string   `json:"save_path"` // where downloads go with current settings
+	AutoFrom      *int     `json:"auto_from"`  // episodes below it are never auto-downloaded; null = no floor
+	AbsOffset     *int     `json:"abs_offset"` // episodes before this show in its series (AniList prequel chain); null = unknown
+	SavePath      string   `json:"save_path"`  // where downloads go with current settings
 	NyaaQuery     string   `json:"nyaa_query"`
 	AddedAt       int64    `json:"added_at"`
 	UpdatedAt     int64    `json:"updated_at"`
@@ -71,6 +72,7 @@ type EpisodeRow struct {
 	BannerURL     string      `json:"banner_url"`
 	Color         string      `json:"color"`
 	Number        int         `json:"number"`
+	AbsNumber     *int        `json:"abs_number"` // number + effective offset when that offset > 0, else null (SPEC v1.3 section 1.4)
 	Title         string      `json:"title"`
 	AiredAt       *int64      `json:"aired_at"`
 	DubAiredAt    *int64      `json:"dub_aired_at"`
@@ -110,6 +112,7 @@ type CalendarItem struct {
 	ShowID        int64  `json:"show_id"`
 	Title         string `json:"title"`
 	Episode       int    `json:"episode"`
+	AbsNumber     *int   `json:"abs_number"` // like EpisodeRow.abs_number
 	AiredAt       *int64 `json:"aired_at"`
 	DubAiredAt    *int64 `json:"dub_aired_at"`
 	OnDisk        bool   `json:"on_disk"`
@@ -169,7 +172,7 @@ func (cc *cardCtx) full(sh store.Show) ShowFull {
 		ShowCard: cc.card(sh), MALID: sh.MALID, TitleNative: sh.TitleNative, Synonyms: syn, Season: sh.Season,
 		SeasonYear: sh.SeasonYear, DurationMin: sh.DurationMin, SearchQuery: sh.SearchQuery, EpisodeOffset: sh.EpisodeOffset,
 		GroupOrder: sh.GroupOrder, Resolution: sh.Resolution, AutoDownload: sh.AutoDownload, Folder: sh.Folder, AutoFrom: sh.AutoFrom,
-		SavePath: sched.SavePath(cc.c, sh), NyaaQuery: sched.NyaaQuery(sh), AddedAt: sh.AddedAt, UpdatedAt: sh.UpdatedAt,
+		AbsOffset: apiAbsOffset(sh.AbsOffset), SavePath: sched.SavePath(cc.c, sh), NyaaQuery: sched.NyaaQuery(sh), AddedAt: sh.AddedAt, UpdatedAt: sh.UpdatedAt,
 	}
 }
 
@@ -194,12 +197,23 @@ var releaseRank = map[string]int{
 	store.RelDownloading: 1, store.RelAdded: 2, store.RelChosen: 3, store.RelDone: 4, store.RelFailed: 5,
 }
 
-func currentRelease(rels []store.Release, ep int) *store.Release {
+// failedTTL is how long a failed release stays the current release of its
+// episode (SPEC v1.3 section 2.2).
+const failedTTL = 7 * 24 * 60 * 60
+
+// currentRelease is the release shown for episode ep (rels = all releases of
+// the show, now = unix seconds). A failed release is left out when a newer
+// release (greater id, any status except replaced) covers the same episode,
+// or when its status was set more than 7 days ago (status_at, else first_seen).
+func currentRelease(rels []store.Release, ep int, now int64) *store.Release {
 	var best *store.Release
 	for i := range rels {
 		r := &rels[i]
 		rk, ok := releaseRank[r.Status]
 		if !ok || !r.Covers(ep) {
+			continue
+		}
+		if r.Status == store.RelFailed && failedHidden(rels, r, ep, now) {
 			continue
 		}
 		if best == nil || rk < releaseRank[best.Status] || (rk == releaseRank[best.Status] && r.ID > best.ID) {
@@ -209,22 +223,58 @@ func currentRelease(rels []store.Release, ep int) *store.Release {
 	return best
 }
 
+func failedHidden(rels []store.Release, f *store.Release, ep int, now int64) bool {
+	at := f.StatusAt
+	if at == 0 {
+		at = f.FirstSeen
+	}
+	if now-at > failedTTL {
+		return true
+	}
+	for i := range rels {
+		o := &rels[i]
+		if o.ID > f.ID && o.Status != store.RelReplaced && o.Covers(ep) {
+			return true
+		}
+	}
+	return false
+}
+
+// apiAbsOffset is abs_offset as the API shows it: null when not computed or
+// when the chain is unknown (stored -1).
+func apiAbsOffset(v *int) *int {
+	if v == nil || *v <= -1 {
+		return nil
+	}
+	return v
+}
+
+// absNumber is number + the show's effective offset when that offset is
+// positive, else nil.
+func absNumber(sh store.Show, number int) *int {
+	if o := store.EffectiveOffset(sh); o > 0 {
+		n := number + o
+		return &n
+	}
+	return nil
+}
+
 func fileRef(f store.File) *FileRef {
 	return &FileRef{ID: f.ID, Path: f.Path, Name: filepath.Base(f.Path), Size: f.Size, ReleaseGroup: f.ReleaseGroup, Resolution: f.Resolution, Version: f.Version}
 }
 
-func episodeRow(c settings.Settings, ac sched.AutoContext, sh store.Show, e store.Episode, files map[int]store.File, rels []store.Release) EpisodeRow {
+func episodeRow(c settings.Settings, ac sched.AutoContext, sh store.Show, e store.Episode, files map[int]store.File, rels []store.Release, now int64) EpisodeRow {
 	row := EpisodeRow{
 		ShowID: sh.ID, ShowTitle: sched.DisplayTitle(c, sh), CoverURL: sh.CoverURL, BannerURL: sh.BannerURL, Color: sh.Color,
-		Number: e.Number, Title: e.Title, AiredAt: e.AiredAt, DubAiredAt: e.DubAiredAt, WatchedAt: e.WatchedAt, WatchedSource: e.WatchedSource,
-		Auto: e.Auto,
+		Number: e.Number, AbsNumber: absNumber(sh, e.Number), Title: e.Title, AiredAt: e.AiredAt, DubAiredAt: e.DubAiredAt,
+		WatchedAt: e.WatchedAt, WatchedSource: e.WatchedSource, Auto: e.Auto,
 	}
 	f, hasFile := files[e.Number]
 	if hasFile {
 		row.File = fileRef(f)
 	}
 	row.AutoReason = ac.Reason(e, hasFile, rels)
-	if r := currentRelease(rels, e.Number); r != nil {
+	if r := currentRelease(rels, e.Number, now); r != nil {
 		row.Release = &ReleaseRef{ID: r.ID, Status: r.Status, Title: r.Title, Seeders: r.Seeders}
 	}
 	return row
@@ -257,8 +307,9 @@ func (s *Server) showRows(ctx context.Context, c settings.Settings, sh store.Sho
 	}
 	sort.Slice(eps, func(i, j int) bool { return eps[i].Number < eps[j].Number })
 	rows := make([]EpisodeRow, 0, len(eps))
+	now := s.now().Unix()
 	for _, e := range eps {
-		rows = append(rows, episodeRow(c, ac, sh, e, best, rels))
+		rows = append(rows, episodeRow(c, ac, sh, e, best, rels, now))
 	}
 	return rows, files, rels, nil
 }

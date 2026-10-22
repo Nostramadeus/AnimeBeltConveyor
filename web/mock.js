@@ -87,7 +87,12 @@
       list_status: 'completed', score: 9, group: 'EMBER', aired: 24, lastAt: 1718290800, disk: [1, 24], watched: [1, 24], activity: -60 * D },
     { id: 6, anilist_id: 166531, mal_id: 55791, title_romaji: '[Oshi no Ko] 2nd Season', title_english: 'OSHI NO KO Season 2', title_native: '【推しの子】第2期', synonyms: ['[OSHI NO KO] Season 2'],
       cover: 'cover/large/bx166531-dAL5MsqDHUkj.jpg', banner: 'banner/166531-vUu7iDwUkC67.jpg', color: '#e44343', format: 'TV', status: 'FINISHED', season: 'SUMMER', season_year: 2024, episodes_total: 13, duration_min: 24,
-      list_status: 'planning', score: null, group: 'SubsPlease', aired: 13, lastAt: 1728216000, disk: null, watched: null, activity: -10 * D },
+      list_status: 'planning', score: null, group: 'SubsPlease', aired: 13, lastAt: 1728216000, disk: null, watched: null, activity: -10 * D, abs_offset: null },
+    // SPEC-v1.3 1.4: the sequel. AniList numbers it from 1; SubsPlease names its files 25, 26... (abs_offset 24).
+    { id: 14, anilist_id: 145064, mal_id: 51009, title_romaji: 'Jujutsu Kaisen 2nd Season', title_english: 'JUJUTSU KAISEN Season 2', title_native: '呪術廻戦 第2期', synonyms: ['JJK2'],
+      cover: 'cover/large/bx145064-hSNRJM03pvv1.jpg', banner: 'banner/145064-esDtAY2He7sk.jpg', color: '#a178d6', format: 'TV', status: 'RELEASING', season: 'SUMMER', season_year: 2023, episodes_total: 23, duration_min: 24,
+      list_status: 'watching', score: null, group: 'SubsPlease', aired: 6, lastAt: r30(T0 - 1 * D - 3 * H), disk: [1, 3], watched: [1, 2], activity: -10 * 60,
+      abs_offset: 24, fileTitle: 'Jujutsu Kaisen', fileOffset: 24 },
   ];
   // Fall 2026 season list (AniList, POPULARITY_DESC), used by /api/season and /api/search.
   const SEASON_POOL = [
@@ -122,6 +127,7 @@
       cover_url: d.cover_url || CDN + d.cover, banner_url: d.banner_url !== undefined ? d.banner_url : CDN + d.banner, color: d.color, format: d.format, status: d.status, season: d.season, season_year: d.season_year,
       episodes_total: d.episodes_total, duration_min: d.duration_min, list_status: d.list_status, score: d.score,
       search_query: null, episode_offset: 0, group_order: null, resolution: null, auto_download: null, folder: null, auto_from: null,
+      abs_offset: d.abs_offset !== undefined ? d.abs_offset : 0,
       added_at: T0 - 90 * D, updated_at: T0 + d.activity, _activity: T0 + d.activity,
     };
     if (d.id === 2) s.search_query = 'One Piece';
@@ -134,7 +140,7 @@
       const watched = inR(d.watched, n) ? Math.min(aired + 5 * H, T0 + d.activity - (lastWatched - n) * 120) : null;
       list.push({ number: n, aired_at: aired, dub_aired_at: d.dubLag ? aired + d.dubLag : null, title: null, watched_at: watched, watched_source: watched ? (n === lastWatched ? 'player' : 'import') : null, auto: null });
       if (inR(d.disk, n)) {
-        const name = `[${d.group}] ${d.title_romaji.replace(/[[\]]/g, '')} - ${pad(n)} (1080p) [${hex8(d.id, n)}].mkv`;
+        const name = `[${d.group}] ${d.fileTitle || d.title_romaji.replace(/[[\]]/g, '')} - ${pad(n + (d.fileOffset || 0))} (1080p) [${hex8(d.id, n)}].mkv`;
         files.push({ id: fileId++, path: `D:\\Anime\\${d.title_romaji.replace(/[[\]:]/g, '')}\\${name}`, name, size: 1300000000 + ((n * 7919) % 400) * 1000000, mtime: aired + 2 * H, show_id: d.id, episode: n, release_group: d.group, resolution: '1080p', version: 1, present: 1, first_seen: aired + 2 * H, last_seen: T0 });
       }
     }
@@ -151,6 +157,7 @@
       release_group: group, resolution: res, version: extra.version || 1, is_batch: 0, seeders, leechers: Math.round(seeders / 9), size_bytes: res === '720p' ? 720000000 : 1420000000,
       published_at: (ep0 ? ep0.aired_at : T0) + (extra.after || 40 * 60), status, qbit_hash: null, status_note: extra.note || null, first_seen: (ep0 ? ep0.aired_at : T0) + (extra.after || 45 * 60),
     };
+    r.status_at = extra.status_at || r.first_seen;
     releases.push(r);
     return r;
   }
@@ -168,8 +175,11 @@
     // SPEC-v1.1 9 demo: [Oshi no Ko] S2 finished long ago, so none of its episodes are auto-downloaded.
     // Candidates for 1-12 (13 has none, so Download all missing reports 1 skipped); ep 3 was removed in qBittorrent.
     for (let n = 1; n <= 12; n++) addRelease(6, n, 'SubsPlease', '1080p', 300 + n * 17, 'candidate');
-    addRelease(6, 3, 'SubsPlease', '1080p', 320, 'failed', { note: 'torrent is no longer in qBittorrent' });
+    addRelease(6, 3, 'SubsPlease', '1080p', 320, 'skipped', { note: 'removed in qBittorrent' }); // SPEC-v1.3 2.1
     episodes[6].find((e) => e.number === 3).auto = 0;
+    // SPEC-v1.3 2.2 demo on the sequel: ep 4 failed 10 days ago (hidden, "Not auto" takes the cell), ep 5 failed 2 h ago (shown).
+    addRelease(14, 4, 'SubsPlease', '1080p', 610, 'failed', { title: '[SubsPlease] Jujutsu Kaisen - 28 (1080p)', note: 'qBittorrent state error', status_at: T0 - 10 * D });
+    addRelease(14, 5, 'SubsPlease', '1080p', 840, 'failed', { title: '[SubsPlease] Jujutsu Kaisen - 29 (1080p)', note: 'qBittorrent state missingFiles', status_at: T0 - 2 * H });
     if (MANY) {
       // SPEC-v1.2 7: six more shows, none with files and none missing (caught up, paused, planning, dropped),
       // so the grid fills up while Play next keeps 3 cards and Needs you keeps 2.
@@ -239,10 +249,16 @@
   // ---------------------------------------------------------------- derived shapes (SPEC 8)
   const titleOf = (s) => (settings.titles.language === 'english' ? s.title_english || s.title_romaji : s.title_romaji);
   const fileOf = (sid, n) => files.find((f) => f.show_id === sid && f.episode === n && f.present);
+  // SPEC-v1.3 2.2: a failed release is not the current one when a newer release (any status but replaced)
+  // covers the episode, or when its status was set more than 7 days ago.
+  const failedShown = (r, rs) => !(now() - (r.status_at || r.first_seen) > 7 * D) && !rs.some((o) => o.id > r.id && o.status !== 'replaced');
   const curRelease = (sid, n) => {
     const rs = releases.filter((r) => r.show_id === sid && r.episode === n);
-    return rs.find((r) => ['added', 'downloading', 'chosen'].includes(r.status)) || rs.find((r) => r.status === 'done') || rs.find((r) => r.status === 'failed') || null;
+    return rs.find((r) => ['added', 'downloading', 'chosen'].includes(r.status)) || rs.find((r) => r.status === 'done')
+      || rs.filter((r) => r.status === 'failed' && failedShown(r, rs)).sort((a, b) => b.id - a.id)[0] || null;
   };
+  /** SPEC-v1.3 1.4: number + the show's effective offset (manual first, else AniList's), null when 0. */
+  const absNum = (s, n) => { const o = Number(s.episode_offset) || Number(s.abs_offset) || 0; return o > 0 ? n + o : null; };
   function card(s) {
     const eps = episodes[s.id] || [];
     const t = now();
@@ -263,7 +279,7 @@
     if (rs.some((r) => ACTIVE.includes(r.status))) return '';
     if (e.auto === 0) {
       const last = rs.filter((r) => r.status !== 'candidate').sort((a, b) => b.id - a.id)[0];
-      return last && last.status === 'failed' && /no longer in qBittorrent/.test(last.status_note || '') ? 'removed from qBittorrent' : 'turned off';
+      return last && last.status === 'skipped' && /^removed in qBittorrent/.test(last.status_note || '') ? 'removed in qBittorrent' : 'turned off';
     }
     if (s.auto_from != null && e.number < s.auto_from) return `before episode ${s.auto_from}`;
     if (e.auto === 1) return '';
@@ -289,7 +305,7 @@
     const r = curRelease(s.id, e.number);
     return {
       auto: e.auto ?? null, auto_reason: autoReason(s, e),
-      show_id: s.id, show_title: titleOf(s), cover_url: s.cover_url, banner_url: s.banner_url, color: s.color, number: e.number, title: e.title, aired_at: e.aired_at, dub_aired_at: e.dub_aired_at,
+      show_id: s.id, show_title: titleOf(s), cover_url: s.cover_url, banner_url: s.banner_url, color: s.color, number: e.number, abs_number: absNum(s, e.number), title: e.title, aired_at: e.aired_at, dub_aired_at: e.dub_aired_at,
       watched_at: e.watched_at, watched_source: e.watched_source,
       file: f ? { id: f.id, path: f.path, name: f.name, size: f.size, release_group: f.release_group, resolution: f.resolution, version: f.version } : null,
       release: r ? { id: r.id, status: r.status, title: r.title, seeders: r.seeders } : null,
@@ -316,7 +332,7 @@
   function showDetail(s) {
     const c = card(s);
     return {
-      show: { ...c, mal_id: s.mal_id, title_native: s.title_native, synonyms: s.synonyms, season: s.season, season_year: s.season_year, duration_min: s.duration_min, search_query: s.search_query, episode_offset: s.episode_offset, group_order: s.group_order, resolution: s.resolution, auto_download: s.auto_download, folder: s.folder, auto_from: s.auto_from, added_at: s.added_at, updated_at: s.updated_at },
+      show: { ...c, mal_id: s.mal_id, title_native: s.title_native, synonyms: s.synonyms, season: s.season, season_year: s.season_year, duration_min: s.duration_min, search_query: s.search_query, episode_offset: s.episode_offset, group_order: s.group_order, resolution: s.resolution, auto_download: s.auto_download, folder: s.folder, auto_from: s.auto_from, abs_offset: s.abs_offset, added_at: s.added_at, updated_at: s.updated_at },
       episodes: (episodes[s.id] || []).map((e) => epRow(s, e)),
       releases: releases.filter((r) => r.show_id === s.id),
       files: files.filter((f) => f.show_id === s.id),
@@ -370,7 +386,7 @@
         const inDub = e.dub_aired_at && e.dub_aired_at >= from && e.dub_aired_at < to;
         if (!inSub && !inDub) continue;
         const r = curRelease(s.id, e.number);
-        out.push({ show_id: s.id, title: titleOf(s), episode: e.number, aired_at: e.aired_at, dub_aired_at: e.dub_aired_at, on_disk: !!fileOf(s.id, e.number), watched: !!e.watched_at, release_status: r ? r.status : null });
+        out.push({ show_id: s.id, title: titleOf(s), episode: e.number, abs_number: absNum(s, e.number), aired_at: e.aired_at, dub_aired_at: e.dub_aired_at, on_disk: !!fileOf(s.id, e.number), watched: !!e.watched_at, release_status: r ? r.status : null });
       }
     }
     return out;
@@ -599,7 +615,7 @@
       if (exists(td)) { status = 'added'; note = `saved ${safeName(r.title)}.torrent to the watch folder`; msg = `${label}: .torrent saved to the watch folder (${r.title})`; }
       else { note = `watch folder not reachable: ${td}`; msg = `${label}: chosen, ${note} (${r.title})`; }
     }
-    r.status = status; r.status_note = note;
+    r.status = status; r.status_note = note; r.status_at = now();
     emit('release.added', r.show_id, r.episode, msg, { release_id: r.id, title: r.title, manual: status === 'chosen', magnet: r.magnet, note, mode });
   }
   const ROUTES = [
@@ -697,6 +713,19 @@
       emit(w ? 'episode.watched' : 'episode.unwatched', s.id, e.number, `${titleOf(s)} ${e.number} ${w ? 'marked watched' : 'marked unwatched'}`);
       return okb(epRow(s, e));
     }],
+    // SPEC-v1.3 2.3: failed -> skipped "cleared by user", optional {episode}; no event, auto flags untouched.
+    ['POST', /^\/api\/shows\/(\d+)\/releases\/clear-failed$/, (m, b) => {
+      const s = showById(m[1]);
+      if (!s) return err(404, 'Show not found');
+      const ep = b && b.episode != null ? b.episode : null;
+      if (ep !== null && (!Number.isInteger(ep) || ep < 1)) return { status: 400, body: { error: 'episode must be a whole number 1 or more', fields: { episode: 'must be a whole number 1 or more' } } };
+      let n = 0;
+      for (const r of releases) {
+        if (r.show_id !== s.id || r.status !== 'failed' || (ep !== null && r.episode !== ep)) continue;
+        r.status = 'skipped'; r.status_note = 'cleared by user'; r.status_at = now(); n++;
+      }
+      return okb({ cleared: n });
+    }],
     ['POST', /^\/api\/shows\/(\d+)\/refresh$/, (m) => {
       const s = showById(m[1]);
       if (!s) return err(404, 'Show not found');
@@ -758,7 +787,7 @@
     ['POST', /^\/api\/releases\/(\d+)\/skip$/, (m) => {
       const r = releases.find((x) => x.id === Number(m[1]));
       if (!r) return err(404, 'Release not found');
-      r.status = 'skipped'; r.status_note = 'skipped by you';
+      r.status = 'skipped'; r.status_note = 'skipped by you'; r.status_at = now();
       emit('release.skipped', r.show_id, r.episode, `Skipped ${r.title}`);
       return okb(r);
     }],
@@ -770,6 +799,7 @@
       }, 1200);
       return okb({ started: true });
     }],
+    ['POST', /^\/api\/quit$/, () => okb({ ok: true })], // the real server shuts down after answering
     ['POST', /^\/api\/scan\/run$/, () => { setTimeout(() => emit('scan.done', null, null, `Scan finished: ${files.length.toLocaleString()} files, 0 new`), 1500); return okb({ started: true }); }],
     ['POST', /^\/api\/files\/(\d+)\/open$/, (m) => (files.some((f) => f.id === Number(m[1])) ? okb({ ok: true }) : err(404, 'File not found'))],
     ['POST', /^\/api\/files\/(\d+)\/reveal$/, (m) => (files.some((f) => f.id === Number(m[1])) ? okb({ ok: true }) : err(404, 'File not found'))],
@@ -801,6 +831,6 @@
     if (!res) res = err(404, `mock: no route for ${method} ${u.pathname}`);
     return new Response(JSON.stringify(res.body), { status: res.status, headers: { 'Content-Type': 'application/json' } });
   };
-  window.__ABC_MOCK__ = { settings, shows, episodes, files, releases, events, emit, get folders() { return settings.library.folders; }, exists, downloadDir };
+  window.__ABC_MOCK__ = { settings, shows, episodes, files, releases, events, emit, streams: sources, get folders() { return settings.library.folders; }, exists, downloadDir };
   console.info('[ABC] mock backend active', [FRESH && 'fresh', SETUP && 'setup', MISSING && 'missing', LOWDISK && 'lowdisk', NOFILES && 'nofiles', MANY && 'many'].filter(Boolean).join(' '));
 })();

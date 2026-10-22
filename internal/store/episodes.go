@@ -222,3 +222,24 @@ func (d *DB) MaxWatched(ctx context.Context, showID int64) (int, error) {
 	err := d.db.QueryRowContext(ctx, `SELECT MAX(number) FROM episodes WHERE show_id=? AND watched_at IS NOT NULL`, showID).Scan(&n)
 	return int(n.Int64), err
 }
+
+// MaxEpisodeNumbers returns, per show, the highest episode number in the
+// episodes table (shows without rows are absent). One query for all shows
+// (SPEC v1.3 section 1.3, ShowTitles.EpisodesKnown).
+func (d *DB) MaxEpisodeNumbers(ctx context.Context) (map[int64]int, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT show_id, MAX(number) FROM episodes GROUP BY show_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int{}
+	for rows.Next() {
+		var id int64
+		var n sql.NullInt64
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = int(n.Int64)
+	}
+	return out, rows.Err()
+}

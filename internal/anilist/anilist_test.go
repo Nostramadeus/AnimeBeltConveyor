@@ -83,8 +83,19 @@ func fakeAniList(t *testing.T, rec *recorder) (*httptest.Server, *Client) {
 			if v["page"] == 2.0 {
 				name = "season_p2.json"
 			}
+		case strings.Contains(q, "Media(id: $id, type: ANIME) { id episodes"):
+			switch v["id"] {
+			case 145064.0:
+				name = "relations_145064.json"
+			case 113415.0:
+				name = "relations_113415.json"
+			default:
+				name, status = "notfound.json", 404
+			}
 		case strings.Contains(q, "Media(id: $id, idMal: $idMal"):
 			switch {
+			case v["id"] == 145064.0 && v["page"] == 1.0:
+				name = "media_145064_p1.json"
 			case v["idMal"] == 52991.0:
 				name = "media_154587_real.json"
 			case v["id"] == 154587.0 && v["page"] == 1.0:
@@ -413,5 +424,96 @@ func TestQueriesMentionSpecFields(t *testing.T) {
 	}
 	if !strings.Contains(QuerySeason, "format_in: [TV, TV_SHORT, ONA], sort: POPULARITY_DESC") {
 		t.Error("QuerySeason filter")
+	}
+}
+
+func TestQueriesAskForRelations(t *testing.T) {
+	want := "relations { edges { relationType node { id type format episodes seasonYear startDate { year month day } } } }"
+	if !strings.Contains(QueryMedia, want) || !strings.Contains(QueryRelations, want) {
+		t.Error("QueryMedia / QueryRelations lack the relations block")
+	}
+	if strings.Contains(QueryRelations, "airingSchedule") || !strings.Contains(QueryRelations, "id episodes") {
+		t.Error("QueryRelations must be the small query (id episodes relations, no airing schedule)")
+	}
+}
+
+// SPEC v1.3 section 1.2: prequel selection.
+func TestPickPrequel(t *testing.T) {
+	edge := func(rel string, id int, typ, format string, eps, y, m, d int) rawEdge {
+		var e rawEdge
+		e.RelationType = rel
+		e.Node.ID, e.Node.Type, e.Node.Format, e.Node.Episodes = id, typ, format, eps
+		e.Node.StartDate.Year, e.Node.StartDate.Month, e.Node.StartDate.Day = y, m, d
+		return e
+	}
+	cases := []struct {
+		name  string
+		edges []rawEdge
+		want  int // id, 0 = nil
+	}{
+		{"none", nil, 0},
+		{"only sequel and source", []rawEdge{edge("SEQUEL", 1, "ANIME", "TV", 12, 2024, 1, 1), edge("SOURCE", 2, "MANGA", "MANGA", 0, 2010, 1, 1)}, 0},
+		{"movie, OVA, special and manga never count", []rawEdge{
+			edge("PREQUEL", 3, "ANIME", "MOVIE", 1, 2022, 1, 1), edge("PREQUEL", 4, "ANIME", "OVA", 2, 2022, 1, 1),
+			edge("PREQUEL", 5, "ANIME", "SPECIAL", 1, 2022, 1, 1), edge("PREQUEL", 6, "MANGA", "MANGA", 0, 2022, 1, 1)}, 0},
+		{"TV beats the movie", []rawEdge{edge("PREQUEL", 131573, "ANIME", "MOVIE", 1, 2021, 12, 24), edge("PREQUEL", 113415, "ANIME", "TV", 24, 2020, 10, 3)}, 113415},
+		{"TV_SHORT and ONA count", []rawEdge{edge("PREQUEL", 7, "ANIME", "TV_SHORT", 12, 2019, 1, 1)}, 7},
+		{"greatest start date wins over a greater id", []rawEdge{edge("PREQUEL", 90, "ANIME", "TV", 12, 2019, 4, 1), edge("PREQUEL", 10, "ANIME", "ONA", 12, 2021, 1, 9)}, 10},
+		{"same date: greatest id", []rawEdge{edge("PREQUEL", 11, "ANIME", "TV", 12, 2020, 1, 1), edge("PREQUEL", 12, "ANIME", "TV", 12, 2020, 1, 1)}, 12},
+		{"an unknown date: greatest id", []rawEdge{edge("PREQUEL", 30, "ANIME", "TV", 12, 2024, 1, 1), edge("PREQUEL", 31, "ANIME", "TV", 12, 0, 0, 0), edge("PREQUEL", 20, "ANIME", "TV", 12, 2025, 1, 1)}, 31},
+	}
+	for _, c := range cases {
+		got := pickPrequel(c.edges)
+		gotID := 0
+		if got != nil {
+			gotID = got.ID
+		}
+		if gotID != c.want {
+			t.Errorf("%s: picked %d, want %d", c.name, gotID, c.want)
+		}
+	}
+	p := pickPrequel([]rawEdge{edge("PREQUEL", 113415, "ANIME", "TV", 24, 2020, 10, 3)})
+	if *p != (RelNode{ID: 113415, Format: "TV", Episodes: 24, StartDate: 20201003}) {
+		t.Errorf("RelNode = %+v", *p)
+	}
+}
+
+func TestMediaReadsPrequel(t *testing.T) {
+	rec := &recorder{}
+	_, c := fakeAniList(t, rec)
+	m, err := c.Media(context.Background(), 145064)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Prequel == nil || m.Prequel.ID != 113415 || m.Prequel.Episodes != 24 || m.Prequel.Format != "TV" || m.Prequel.StartDate != 20201003 {
+		t.Fatalf("prequel = %+v", m.Prequel)
+	}
+	if rec.count() != 1 {
+		t.Errorf("requests = %d, want 1", rec.count())
+	}
+	// Frieren's fixture has no relations block: no prequel.
+	f, err := c.Media(context.Background(), 154587)
+	if err != nil || f.Prequel != nil {
+		t.Fatalf("frieren prequel = %+v %v", f.Prequel, err)
+	}
+}
+
+func TestPrequelHop(t *testing.T) {
+	rec := &recorder{}
+	_, c := fakeAniList(t, rec)
+	ctx := context.Background()
+	eps, p, err := c.Prequel(ctx, 145064)
+	if err != nil || eps != 23 || p == nil || p.ID != 113415 || p.Episodes != 24 {
+		t.Fatalf("Prequel(145064) = %d %+v %v", eps, p, err)
+	}
+	eps, p, err = c.Prequel(ctx, 113415)
+	if err != nil || eps != 24 || p != nil {
+		t.Fatalf("Prequel(113415) = %d %+v %v, want 24 nil", eps, p, err)
+	}
+	if rec.count() != 2 || rec.reqs[0].Variables["id"] != 145064.0 {
+		t.Errorf("requests %+v", rec.reqs)
+	}
+	if _, _, err := c.Prequel(ctx, 1); err == nil {
+		t.Error("unknown id must fail")
 	}
 }

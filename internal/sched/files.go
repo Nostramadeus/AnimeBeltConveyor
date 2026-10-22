@@ -68,7 +68,7 @@ func (s *Sched) scanDirs(ctx context.Context, c settings.Settings, dirs []scan.D
 	if err != nil {
 		return nil, err
 	}
-	titles := Titles(shows)
+	titles := s.titles(ctx, shows)
 	seen := map[string]bool{}
 	var upserts []store.File
 	var touch []int64
@@ -180,7 +180,7 @@ func (s *Sched) matchFile(r ParseResult, path string, titles []ShowTitles) (int,
 	if s.brain.IsRecap(r) || (r.IsBatch && r.Episode == 0) {
 		return 0, 0, false
 	}
-	if sid, ep, ok, _ := s.brain.Match(r, titles); ok && ep > 0 {
+	if sid, ep, ok, _, _ := s.brain.Match(r, titles); ok && ep > 0 {
 		return sid, ep, true
 	}
 	if r.Episode <= 0 {
@@ -195,7 +195,7 @@ func (s *Sched) matchFile(r ParseResult, path string, titles []ShowTitles) (int,
 	if r2.Season == 0 {
 		r2.Season = dir.Season
 	}
-	if sid, ep, ok, _ := s.brain.Match(r2, titles); ok && ep > 0 {
+	if sid, ep, ok, _, _ := s.brain.Match(r2, titles); ok && ep > 0 {
 		return sid, ep, true
 	}
 	return 0, 0, false
@@ -225,7 +225,18 @@ func (s *Sched) currentTitles(ctx context.Context) []ShowTitles {
 	if err != nil {
 		return nil
 	}
-	return Titles(shows)
+	return s.titles(ctx, shows)
+}
+
+// titles is Titles with the highest known episode numbers read in one query
+// (one per conveyor or scan run, not per show). A failed read leaves
+// EpisodesKnown 0.
+func (s *Sched) titles(ctx context.Context, shows []store.Show) []ShowTitles {
+	known, err := s.st.MaxEpisodeNumbers(ctx)
+	if err != nil {
+		known = nil
+	}
+	return Titles(shows, known)
 }
 
 // onFileSeen is the watcher callback for a new or changed video file.
@@ -422,9 +433,10 @@ func (s *Sched) qbitRun(ctx context.Context) error {
 		if errors.Is(err, qbit.ErrNotFound) {
 			sh, _ := s.st.GetShow(ctx, r.ShowID)
 			// SPEC v1.1 section 9: the user removed it, so the episode stops auto-downloading.
-			s.st.SetReleaseStatus(ctx, r.ID, store.RelFailed, noteRemoved)
+			// SPEC v1.3 section 2.1: that is a skip, not a failure.
+			s.st.SetReleaseStatus(ctx, r.ID, store.RelSkipped, noteRemoved)
 			s.turnOffAuto(ctx, r)
-			s.ev.Log(events.DownloadFailed, r.ShowID, ep, title(sh)+" "+epLabel(ep)+": torrent is no longer in qBittorrent; not downloading it again (press Add to retry)",
+			s.ev.Log(events.ReleaseSkipped, r.ShowID, ep, title(sh)+" "+epLabel(ep)+": torrent is no longer in qBittorrent; not downloading it again (press Add to retry)",
 				map[string]any{"release_id": r.ID, "auto": 0})
 			continue
 		}

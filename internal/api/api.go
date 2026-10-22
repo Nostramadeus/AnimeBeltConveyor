@@ -42,6 +42,9 @@ type Server struct {
 	dataDir string     // ABC's data folder (reported in /api/state, may be opened)
 	exeDir  string     // folder abc.exe runs from
 	homeDir func() (string, error)
+
+	quit     chan struct{} // closed by POST /api/quit
+	quitOnce sync.Once
 }
 
 type malState struct {
@@ -52,7 +55,8 @@ type malState struct {
 // New builds the API server. web is the static UI (may be nil in tests).
 func New(st *store.DB, set *settings.Manager, ev *events.Logger, sch *sched.Sched, web fs.FS) *Server {
 	s := &Server{st: st, set: set, ev: ev, sch: sch, brain: sch.Brain(), web: web,
-		now: time.Now, ping: 25 * time.Second, malStates: map[string]malState{}, homeDir: os.UserHomeDir}
+		now: time.Now, ping: 25 * time.Second, malStates: map[string]malState{}, homeDir: os.UserHomeDir,
+		quit: make(chan struct{})}
 	if exe, err := os.Executable(); err == nil {
 		s.exeDir = filepath.Dir(exe)
 	}
@@ -68,12 +72,27 @@ func (s *Server) SetDirs(dataDir, exeDir string) {
 	}
 }
 
+// Quit is closed when the user asks ABC to quit (POST /api/quit). main waits
+// on it next to Ctrl-C and shuts down the same way.
+func (s *Server) Quit() <-chan struct{} { return s.quit }
+
+// postQuit is POST /api/quit -> {ok: true}; the reply is flushed before the
+// quit signal fires, so the page sees it before the server goes away.
+func (s *Server) postQuit(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	s.quitOnce.Do(func() { close(s.quit) })
+}
+
 // Handler returns the full HTTP handler (API + static UI) behind the local-only guard.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	h := func(pattern string, fn func(http.ResponseWriter, *http.Request)) { mux.HandleFunc(pattern, fn) }
 
 	h("GET /api/state", s.getState)
+	h("POST /api/quit", s.postQuit)
 	h("GET /api/settings", s.getSettings)
 	h("PUT /api/settings", s.putSettings)
 	h("GET /api/settings/test/qbit", s.testQbit)
@@ -100,6 +119,7 @@ func (s *Server) Handler() http.Handler {
 	h("GET /api/shows/{id}/download-missing", s.downloadMissingPreview)
 	h("POST /api/shows/{id}/download-missing", s.downloadMissing)
 	h("POST /api/shows/{id}/refresh", s.refreshShow)
+	h("POST /api/shows/{id}/releases/clear-failed", s.clearFailed)
 
 	h("GET /api/search", s.search)
 	h("GET /api/season", s.season)

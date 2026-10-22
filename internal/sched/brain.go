@@ -13,7 +13,9 @@ type Brain interface {
 	// parse / match / release (SPEC 5)
 	Parse(name string) ParseResult
 	IsRecap(r ParseResult) bool
-	Match(r ParseResult, shows []ShowTitles) (showID int, episode int, ok bool, score float64)
+	// Match: shift is what was subtracted from the release number (0 = read as the
+	// show's own numbering, O = read as absolute); a batch range end is EpisodeEnd - shift.
+	Match(r ParseResult, shows []ShowTitles) (showID int, episode int, ok bool, score float64, shift int)
 	Pick(cands []Candidate, rules Rules, now time.Time, airedAt time.Time) (chosen *Candidate, reason string)
 
 	// nyaa (SPEC 4)
@@ -26,6 +28,9 @@ type Brain interface {
 	// AniList (SPEC 4)
 	Search(ctx context.Context, q string) ([]MediaSummary, error)
 	Media(ctx context.Context, id int) (Media, error)
+	// Prequel is one hop of the prequel chain (SPEC v1.3 section 1.2): the
+	// media's own episode count (0 = unknown) and its prequel (nil = none).
+	Prequel(ctx context.Context, id int) (episodes int, prequel *RelNode, err error)
 	MediaByMAL(ctx context.Context, malID int) (Media, error)
 	Season(ctx context.Context, season string, year int) ([]MediaSummary, error)
 	AniListUserList(ctx context.Context, userName string) ([]ListEntry, error)
@@ -71,11 +76,13 @@ type ShowTitles struct {
 	Native        string
 	Synonyms      []string
 	SearchQuery   string
-	EpisodeOffset int    // file episode number minus AniList episode number
+	EpisodeOffset int    // manual offset: file episode number minus AniList episode number; 0 = none
 	EpisodesTotal int    // 0 = unknown
 	ListStatus    string // watching, planning, completed, paused, dropped
 	SeasonYear    int
 	Season        int // season number this show is; 0 = unknown
+	AbsOffset     int // episodes before this show in its series; 0 = none / unknown
+	EpisodesKnown int // highest episode number in the episodes table; 0 = none
 }
 
 // Candidate is one release offered to Pick. ID is releases.id.
@@ -151,6 +158,17 @@ type Media struct {
 	MediaSummary
 	Synonyms []string
 	Airing   []AiringNode // whole airingSchedule, all pages
+	Prequel  *RelNode     // the TV / TV_SHORT / ONA entry it follows; nil = none
+}
+
+// RelNode mirrors anilist.RelNode (one prequel of the chain). StartDate is
+// yyyymmdd, 0 = unknown.
+type RelNode struct {
+	ID         int
+	Format     string
+	Episodes   int // 0 = unknown
+	SeasonYear int
+	StartDate  int64
 }
 
 // AiringNode is one airingSchedule entry.

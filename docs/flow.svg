@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="300" viewBox="0 0 960 300" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="15">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#9fb3c8"/>
+    </marker>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#151a24"/><stop offset="1" stop-color="#0f1218"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="300" rx="18" fill="url(#bg)"/>
+
+  <!-- row labels -->
+  <text x="40" y="38" fill="#7f8ea3" font-size="13" letter-spacing="1.5">DOWNLOAD</text>
+  <text x="40" y="222" fill="#7f8ea3" font-size="13" letter-spacing="1.5">WATCH</text>
+
+  <!-- top row: left to right -->
+  <g>
+    <rect x="40" y="50" width="180" height="56" rx="12" fill="#1c2230" stroke="#3a4760"/>
+    <text x="130" y="74" fill="#dfe6f0" text-anchor="middle">AniList</text>
+    <text x="130" y="94" fill="#9fb3c8" text-anchor="middle" font-size="13">airing schedule</text>
+
+    <rect x="270" y="50" width="180" height="56" rx="12" fill="#1f2a3d" stroke="#7aa2ff" stroke-width="1.5"/>
+    <text x="360" y="74" fill="#ffffff" text-anchor="middle">nyaa.si search</text>
+    <text x="360" y="94" fill="#b9c8ff" text-anchor="middle" font-size="13">every 15 min</text>
+
+    <rect x="500" y="50" width="180" height="56" rx="12" fill="#1f2a3d" stroke="#7aa2ff" stroke-width="1.5"/>
+    <text x="590" y="74" fill="#ffffff" text-anchor="middle">release rules</text>
+    <text x="590" y="94" fill="#b9c8ff" text-anchor="middle" font-size="13">group · 1080p · size</text>
+
+    <rect x="730" y="50" width="190" height="56" rx="12" fill="#1c2230" stroke="#3a4760"/>
+    <text x="825" y="74" fill="#dfe6f0" text-anchor="middle">your torrent app</text>
+    <text x="825" y="94" fill="#9fb3c8" text-anchor="middle" font-size="13">qBittorrent or magnet</text>
+  </g>
+
+  <!-- bottom row: right to left -->
+  <g>
+    <rect x="730" y="234" width="190" height="56" rx="12" fill="#1c2230" stroke="#3a4760"/>
+    <text x="825" y="258" fill="#dfe6f0" text-anchor="middle">your folder</text>
+    <text x="825" y="278" fill="#9fb3c8" text-anchor="middle" font-size="13">one per show</text>
+
+    <rect x="500" y="234" width="180" height="56" rx="12" fill="#1f2a3d" stroke="#7aa2ff" stroke-width="1.5"/>
+    <text x="590" y="258" fill="#ffffff" text-anchor="middle">folder scanner</text>
+    <text x="590" y="278" fill="#b9c8ff" text-anchor="middle" font-size="13">matches files to episodes</text>
+
+    <rect x="270" y="234" width="180" height="56" rx="12" fill="#1f2a3d" stroke="#7aa2ff" stroke-width="1.5"/>
+    <text x="360" y="258" fill="#ffffff" text-anchor="middle">Play next</text>
+    <text x="360" y="278" fill="#b9c8ff" text-anchor="middle" font-size="13">marks watched, syncs lists</text>
+
+    <rect x="40" y="234" width="180" height="56" rx="12" fill="#1c2230" stroke="#3a4760"/>
+    <text x="130" y="258" fill="#dfe6f0" text-anchor="middle">your media player</text>
+    <text x="130" y="278" fill="#9fb3c8" text-anchor="middle" font-size="13">mpv, VLC, anything</text>
+  </g>
+
+  <!-- arrows -->
+  <g stroke="#9fb3c8" stroke-width="2" fill="none" marker-end="url(#a)">
+    <path d="M220 78H268"/>
+    <path d="M450 78H498"/>
+    <path d="M680 78H728"/>
+    <path d="M825 106V232"/>
+    <path d="M730 262H682"/>
+    <path d="M500 262H452"/>
+    <path d="M270 262H222"/>
+  </g>
+  <text x="845" y="174" fill="#9fb3c8" font-size="13">download finishes</text>
+
+  <!-- centre: the app -->
+  <rect x="330" y="142" width="300" height="52" rx="26" fill="#0f1218" stroke="#7aa2ff" stroke-dasharray="6 5"/>
+  <text x="480" y="162" fill="#ffffff" text-anchor="middle" font-weight="600">AnimeBeltConveyor</text>
+  <text x="480" y="181" fill="#b9c8ff" text-anchor="middle" font-size="13">blue boxes run inside the app · grey ones are yours</text>
+</svg>

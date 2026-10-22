@@ -435,6 +435,43 @@ func (s *Server) downloadMissing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"added": added, "skipped": skipped})
 }
 
+// clearFailed is POST /api/shows/{id}/releases/clear-failed, body optional
+// {"episode": N}: every failed release of the show (or only those covering
+// episode N) becomes skipped, note "cleared by user" -> {cleared: n}. No event
+// is logged and auto flags are not touched (SPEC v1.3 section 2.3).
+func (s *Server) clearFailed(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(r, "id")
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "bad show id")
+		return
+	}
+	var body map[string]json.RawMessage
+	if err := decode(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var episode *int
+	if raw, present := body["episode"]; present && strings.TrimSpace(string(raw)) != "null" {
+		var n int
+		if err := json.Unmarshal(raw, &n); err != nil || n < 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "episode must be a whole number 1 or more",
+				"fields": map[string]string{"episode": "must be a whole number 1 or more"}})
+			return
+		}
+		episode = &n
+	}
+	if _, err := s.st.GetShow(r.Context(), id); err != nil {
+		writeStoreErr(w, err, "show")
+		return
+	}
+	n, err := s.st.ClearFailedReleases(r.Context(), id, episode, "cleared by user")
+	if err != nil {
+		writeStoreErr(w, err, "show")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cleared": n})
+}
+
 func (s *Server) refreshShow(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(r, "id")
 	if !ok {
@@ -613,10 +650,10 @@ func (s *Server) calendar(w http.ResponseWriter, r *http.Request) {
 		if d.sh.ListStatus == "dropped" {
 			continue
 		}
-		item := CalendarItem{ShowID: e.ShowID, Title: sched.DisplayTitle(c, d.sh), Episode: e.Number, AiredAt: e.AiredAt, DubAiredAt: e.DubAiredAt,
-			Watched: e.WatchedAt != nil}
+		item := CalendarItem{ShowID: e.ShowID, Title: sched.DisplayTitle(c, d.sh), Episode: e.Number, AbsNumber: absNumber(d.sh, e.Number),
+			AiredAt: e.AiredAt, DubAiredAt: e.DubAiredAt, Watched: e.WatchedAt != nil}
 		_, item.OnDisk = d.files[e.Number]
-		if rel := currentRelease(d.rels, e.Number); rel != nil {
+		if rel := currentRelease(d.rels, e.Number, now); rel != nil {
 			item.ReleaseStatus = rel.Status
 		}
 		out = append(out, item)

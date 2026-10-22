@@ -20,11 +20,25 @@ type ShowTitles struct {
 	Native        string
 	Synonyms      []string
 	SearchQuery   string
-	EpisodeOffset int    // file episode number minus AniList episode number
+	EpisodeOffset int    // manual offset: file episode number minus AniList episode number; 0 = none
 	EpisodesTotal int    // 0 = unknown
 	ListStatus    string // watching, planning, completed, paused, dropped
 	SeasonYear    int
 	Season        int // season number this show is (2 for a "2nd Season" entry); 0 = unknown
+	AbsOffset     int // episodes before this show in its series (AniList prequel chain); 0 = none / unknown
+	EpisodesKnown int // highest episode number in the show's episodes table; 0 = none
+}
+
+// offset is O of SPEC v1.3 section 1.3: the manual EpisodeOffset when set,
+// else AbsOffset when above 0.
+func (s *ShowTitles) offset() int {
+	if s.EpisodeOffset != 0 {
+		return s.EpisodeOffset
+	}
+	if s.AbsOffset > 0 {
+		return s.AbsOffset
+	}
+	return 0
 }
 
 // MinJaccard is the token-set Jaccard similarity needed for a fuzzy match.
@@ -32,41 +46,43 @@ const MinJaccard = 0.85
 
 // Match finds the show r belongs to.
 //
-// episode is the AniList-numbered episode: r.Episode - EpisodeOffset.
+// episode is the AniList-numbered episode: r.Episode - shift, where shift is
+// 0 when the number was read as the show's own (season) numbering and O (the
+// show's offset, see episodeFor) when it was read as absolute numbering.
 // For a batch, episode is the first episode of the range (0 when the batch
-// has no range); the caller computes the range end as
-// r.EpisodeEnd - EpisodeOffset. For a movie file (no episode number, not a
-// batch) matched to a show with EpisodesTotal 1, episode is 1.
+// has no range); the caller computes the range end as r.EpisodeEnd - shift.
+// For a movie file (no episode number, not a batch) matched to a show with
+// EpisodesTotal 1, episode is 1.
 // ok is false when no show scores at least MinJaccard or every matching
 // show rejects the episode number.
-func Match(r parse.Result, shows []ShowTitles) (showID int, episode int, ok bool, score float64) {
+func Match(r parse.Result, shows []ShowTitles) (showID int, episode int, ok bool, score float64, shift int) {
 	title := Normalize(r.Title)
 	if title == "" {
-		return 0, 0, false, 0
+		return 0, 0, false, 0, 0
 	}
 	tokens := tokenSet(title)
 
 	bestIdx := -1
 	var bestScore float64
-	var bestEp int
+	var bestEp, bestShift int
 	for i := range shows {
 		s := &shows[i]
 		sc := showScore(title, tokens, r.Season, s)
 		if sc == 0 {
 			continue
 		}
-		ep, valid := episodeFor(r, s)
+		ep, sh, valid := episodeFor(r, s)
 		if !valid {
 			continue
 		}
 		if bestIdx < 0 || better(sc, s, bestScore, &shows[bestIdx]) {
-			bestIdx, bestScore, bestEp = i, sc, ep
+			bestIdx, bestScore, bestEp, bestShift = i, sc, ep, sh
 		}
 	}
 	if bestIdx < 0 {
-		return 0, 0, false, 0
+		return 0, 0, false, 0, 0
 	}
-	return shows[bestIdx].ID, bestEp, true, bestScore
+	return shows[bestIdx].ID, bestEp, true, bestScore, bestShift
 }
 
 const eps = 1e-9
@@ -87,28 +103,88 @@ func better(sa float64, a *ShowTitles, sb float64, b *ShowTitles) bool {
 	return a.SeasonYear > b.SeasonYear
 }
 
-// episodeFor maps the parsed episode to the show's AniList numbering.
-func episodeFor(r parse.Result, s *ShowTitles) (int, bool) {
+// episodeFor maps the parsed episode to the show's AniList numbering
+// (SPEC v1.3 section 1.3). shift is what was subtracted: 0 for the season
+// reading, O for the absolute reading.
+//
+// With an offset O > 0 a number n has two readings: season (S = n) and
+// absolute (A = n - O). The season reading is preferred when the release
+// title carries a season marker; the absolute one when the show's own titles
+// carry a marker and the release's do not; otherwise the season one. The
+// preferred reading is used when valid, else the other, else n is rejected.
+func episodeFor(r parse.Result, s *ShowTitles) (ep, shift int, ok bool) {
 	if r.Episode == 0 {
 		if r.IsBatch {
 			// TODO(spec): SPEC says reject ep <= 0; a batch without a range
 			// has no number, so it is accepted as episode 0 (releases.episode NULL).
-			return 0, true
+			return 0, 0, true
 		}
 		if s.EpisodesTotal == 1 {
 			// TODO(spec): movie file (no episode) on a one-episode show -> episode 1.
-			return 1, true
+			return 1, 0, true
 		}
-		return 0, false
+		return 0, 0, false
 	}
-	ep := r.Episode - s.EpisodeOffset
-	if ep <= 0 {
-		return 0, false
+	o := s.offset()
+	if o <= 0 {
+		// O == 0: unchanged. A negative manual offset (not reachable from the
+		// v1.3 UI, still accepted by the API) keeps the v1 arithmetic.
+		ep := r.Episode - o
+		if ep <= 0 {
+			return 0, 0, false
+		}
+		if s.EpisodesTotal > 0 && ep > s.EpisodesTotal+1 {
+			return 0, 0, false
+		}
+		return ep, o, true
 	}
-	if s.EpisodesTotal > 0 && ep > s.EpisodesTotal+1 {
-		return 0, false
+	n := r.Episode
+	bound := s.EpisodesTotal
+	if bound <= 0 {
+		bound = s.EpisodesKnown
 	}
-	return ep, true
+	// No +1 slack for the season reading: with a positive offset a number one
+	// past the total is read as absolute. When nothing is known about the
+	// length, a number above the offset cannot be a season number.
+	seasonOK := n >= 1 && ((bound == 0 && n <= o) || (bound > 0 && n <= bound))
+	a := n - o
+	absOK := a >= 1 && (bound == 0 || a <= bound+1)
+	preferAbs := !releaseHasMarker(r) && showHasMarker(s)
+	switch {
+	case preferAbs && absOK:
+		return a, o, true
+	case !preferAbs && seasonOK:
+		return n, 0, true
+	case absOK:
+		return a, o, true
+	case seasonOK:
+		return n, 0, true
+	}
+	return 0, 0, false
+}
+
+// releaseHasMarker reports whether the release names a season: the parser
+// found one (r.Season) or its title ends in a season suffix.
+func releaseHasMarker(r parse.Result) bool {
+	if r.Season > 0 {
+		return true
+	}
+	_, num := seasonSuffix(Normalize(r.Title))
+	return num > 0
+}
+
+// showHasMarker reports whether one of the show's own titles (romaji,
+// english, synonyms) ends in a season suffix ("2nd Season", "Part 2", ...).
+func showHasMarker(s *ShowTitles) bool {
+	titles := append([]string{s.Romaji, s.English}, s.Synonyms...)
+	for _, t := range titles {
+		if n := Normalize(t); n != "" {
+			if _, num := seasonSuffix(n); num > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type candidate struct {
@@ -137,7 +213,10 @@ func showScore(title string, tokens map[string]bool, season int, s *ShowTitles) 
 }
 
 var (
-	reOrdSeason = regexp.MustCompile(`^(.+) (\d{1,2})(?:st|nd|rd|th) season$`)
+	// "2nd season", "2nd stage", "2nd part", "2nd cour", and an &-joined pair
+	// ("2nd & 3rd stage", normalized to "2nd 3rd stage") whose first number is
+	// the marker. The base is lazy so the pair's first number is the one taken.
+	reOrdSeason = regexp.MustCompile(`^(.+?) (\d{1,2})(?:st|nd|rd|th)(?: \d{1,2}(?:st|nd|rd|th))? (?:season|stage|part|cour)$`)
 	reSeasonN   = regexp.MustCompile(`^(.+) season (\d{1,2})$`)
 	rePartN     = regexp.MustCompile(`^(.+) part (\d{1,2})$`)
 	reSN        = regexp.MustCompile(`^(.+) s(\d{1,2})$`)
@@ -147,8 +226,9 @@ var (
 
 // candidates returns the normalized titles a show can be matched by:
 // romaji, english, native, synonyms and search_query, plus for a title that
-// ends in a season marker (2nd Season, Season 2, Part 2, S2, II, III, IV)
-// the base title, both carrying that season number as a requirement.
+// ends in a season marker (2nd Season / Stage / Part / Cour, "2nd & 3rd
+// Stage", Season 2, Part 2, S2, II, III, IV) the base title, both carrying
+// that season number as a requirement.
 // Titles without a marker carry s.Season (usually 0 = no requirement).
 func candidates(s *ShowTitles) []candidate {
 	raw := make([]string, 0, 5+len(s.Synonyms))

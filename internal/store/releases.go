@@ -42,6 +42,7 @@ type Release struct {
 	QbitHash     string `json:"qbit_hash"`
 	StatusNote   string `json:"status_note"`
 	FirstSeen    int64  `json:"first_seen"`
+	StatusAt     int64  `json:"status_at"` // when the status was last set (unix seconds); 0 = unknown (old row, use FirstSeen)
 }
 
 // Covers reports whether the release contains episode n (single episode or batch range).
@@ -64,18 +65,19 @@ func (r Release) Covers(n int) bool {
 }
 
 const releaseCols = `id, show_id, episode, episode_end, nyaa_id, title, info_hash, magnet, torrent_url, release_group,
-	resolution, version, is_batch, seeders, leechers, size_bytes, published_at, status, qbit_hash, status_note, first_seen`
+	resolution, version, is_batch, seeders, leechers, size_bytes, published_at, status, qbit_hash, status_note, first_seen, status_at`
 
 func scanRelease(r scanner) (Release, error) {
 	var x Release
-	var ep, epEnd, nyaa, seed, leech, size sql.NullInt64
+	var ep, epEnd, nyaa, seed, leech, size, statusAt sql.NullInt64
 	var hash, magnet, turl, group, res, qhash, note sql.NullString
 	var batch int
 	err := r.Scan(&x.ID, &x.ShowID, &ep, &epEnd, &nyaa, &x.Title, &hash, &magnet, &turl, &group,
-		&res, &x.Version, &batch, &seed, &leech, &size, &x.PublishedAt, &x.Status, &qhash, &note, &x.FirstSeen)
+		&res, &x.Version, &batch, &seed, &leech, &size, &x.PublishedAt, &x.Status, &qhash, &note, &x.FirstSeen, &statusAt)
 	if err != nil {
 		return x, err
 	}
+	x.StatusAt = statusAt.Int64
 	x.Episode, x.EpisodeEnd = ptrInt(ep), ptrInt(epEnd)
 	x.NyaaID = nyaa.Int64
 	x.InfoHash, x.Magnet, x.TorrentURL, x.ReleaseGroup = hash.String, magnet.String, turl.String, group.String
@@ -136,12 +138,13 @@ func (d *DB) UpsertRelease(ctx context.Context, r *Release) (bool, error) {
 			return false, err
 		}
 	}
+	r.StatusAt = r.FirstSeen // SPEC v1.3 section 2.2: insert writes status_at = first_seen
 	res, err := tx.ExecContext(ctx, `INSERT INTO releases(show_id, episode, episode_end, nyaa_id, title, info_hash, magnet, torrent_url,
-		release_group, resolution, version, is_batch, seeders, leechers, size_bytes, published_at, status, qbit_hash, status_note, first_seen)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		release_group, resolution, version, is_batch, seeders, leechers, size_bytes, published_at, status, qbit_hash, status_note, first_seen, status_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ShowID, nint(r.Episode), nint(r.EpisodeEnd), nid(r.NyaaID), r.Title, nstr(strings.ToLower(r.InfoHash)), nstr(r.Magnet), nstr(r.TorrentURL),
 		nstr(r.ReleaseGroup), nstr(r.Resolution), r.Version, b2i(r.IsBatch), nint(r.Seeders), nint(r.Leechers), nint64(r.SizeBytes),
-		r.PublishedAt, r.Status, nstr(r.QbitHash), nstr(r.StatusNote), r.FirstSeen)
+		r.PublishedAt, r.Status, nstr(r.QbitHash), nstr(r.StatusNote), r.FirstSeen, r.StatusAt)
 	if err != nil {
 		return false, err
 	}
@@ -190,12 +193,51 @@ func (d *DB) ReleasesByStatus(ctx context.Context, statuses ...string) ([]Releas
 	return d.queryReleases(ctx, q, args...)
 }
 
-// SetReleaseStatus sets status and status_note.
+// SetReleaseStatus sets status and status_note (status_at = now).
 func (d *DB) SetReleaseStatus(ctx context.Context, id int64, status, note string) error {
-	return d.exec1(ctx, `UPDATE releases SET status=?, status_note=? WHERE id=?`, status, nstr(note), id)
+	return d.exec1(ctx, `UPDATE releases SET status=?, status_note=?, status_at=? WHERE id=?`, status, nstr(note), Now(), id)
 }
 
-// SetReleaseQbit sets status, qbit_hash and status_note in one write.
+// SetReleaseQbit sets status, qbit_hash and status_note in one write (status_at = now).
 func (d *DB) SetReleaseQbit(ctx context.Context, id int64, status, hash, note string) error {
-	return d.exec1(ctx, `UPDATE releases SET status=?, qbit_hash=?, status_note=? WHERE id=?`, status, nstr(hash), nstr(note), id)
+	return d.exec1(ctx, `UPDATE releases SET status=?, qbit_hash=?, status_note=?, status_at=? WHERE id=?`, status, nstr(hash), nstr(note), Now(), id)
+}
+
+// ClearFailedReleases sets every failed release of a show to skipped with
+// note (status_at = now). With episode != nil only the releases covering that
+// episode are cleared (Release.Covers). Returns how many rows changed
+// (SPEC v1.3 section 2.3).
+func (d *DB) ClearFailedReleases(ctx context.Context, showID int64, episode *int, note string) (int, error) {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT `+releaseCols+` FROM releases WHERE show_id=? AND status=?`, showID, RelFailed)
+	if err != nil {
+		return 0, err
+	}
+	var ids []int64
+	for rows.Next() {
+		x, err := scanRelease(rows)
+		if err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if episode == nil || x.Covers(*episode) {
+			ids = append(ids, x.ID)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	now := Now()
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `UPDATE releases SET status=?, status_note=?, status_at=? WHERE id=? AND status=?`,
+			RelSkipped, nstr(note), now, id, RelFailed); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), tx.Commit()
 }

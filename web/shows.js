@@ -3,7 +3,7 @@
    Loaded before app.js; app.js calls the function below with its internals. Plain JS, no dependencies. */
 'use strict';
 (window.ABC_EXT = window.ABC_EXT || []).push((ABC) => {
-  const { $, $$, h, raw, ico, store, S, Views, API, soft, A, showTitle, mediaTitle, progressOf, fNum, fFull, fWhen, safeUrl, isHex, readableAccent, nowSec, plural, debounce, STATUS_LABEL, FORMAT_LABEL, pretty, indexShows, paintFromLast } = ABC;
+  const { $, $$, h, raw, ico, store, S, Views, API, soft, A, showTitle, mediaTitle, progressOf, fNum, fFull, fWhen, safeUrl, isHex, readableAccent, nowSec, plural, debounce, STATUS_LABEL, FORMAT_LABEL, pretty, indexShows, paintFromLast, epNum } = ABC;
 
   // Filter chips in the spec order (3.3). "all" = every list.
   const FILTERS = [['watching', 'Watching'], ['paused', 'Paused'], ['planning', 'Planning'], ['completed', 'Completed'], ['dropped', 'Dropped'], ['all', 'All']];
@@ -48,7 +48,7 @@
     const g = progressOf(s);
     const title = showTitle(s);
     if (x.play && x.play.file) {
-      return h`<button type="button" class="schip schip-play" data-act="play" data-file="${x.play.file.id}" data-show="${s.id}" data-label="episode ${x.play.number}" aria-label="Play ${title} episode ${x.play.number}">${ico('play')}Play<span class="schip-n">Ep ${x.play.number}</span></button>`;
+      return h`<button type="button" class="schip schip-play" data-act="play" data-file="${x.play.file.id}" data-show="${s.id}" data-label="episode ${x.play.number}" aria-label="Play ${title} episode ${x.play.number}">${ico('play')}Play<span class="schip-n">Ep ${epNum(x.play.number, x.play.abs_number)}</span></button>`;
     }
     if (x.dl === 'dl') return h`<span class="schip schip-warn">${ico('download')}Downloading</span>`;
     if (x.dl === 'chosen') return h`<span class="schip schip-warn" title="A release was chosen; add it with the Magnet button on the show page">${ico('magnet')}Magnet ready</span>`;
