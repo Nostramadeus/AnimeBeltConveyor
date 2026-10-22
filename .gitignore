@@ -1,0 +1,11 @@
+abc.exe
+/abc
+*.exe
+.dev-data/
+*.db
+*.db-*
+*.log
+PROGRESS-*.md
+web/.shot-*.png
+*.exe~
+desktop.ini

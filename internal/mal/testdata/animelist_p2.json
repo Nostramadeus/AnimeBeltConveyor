@@ -1,0 +1,58 @@
+{
+ "data": [
+  {
+   "node": {
+    "id": 21,
+    "title": "One Piece",
+    "main_picture": {
+     "medium": "https://cdn.myanimelist.net/images/anime/21t.jpg",
+     "large": "https://cdn.myanimelist.net/images/anime/21l.jpg"
+    }
+   },
+   "list_status": {
+    "status": "on_hold",
+    "score": 8,
+    "num_episodes_watched": 1088,
+    "is_rewatching": false,
+    "updated_at": "2025-11-02T09:00:00+00:00"
+   }
+  },
+  {
+   "node": {
+    "id": 5114,
+    "title": "Fullmetal Alchemist: Brotherhood",
+    "main_picture": {
+     "medium": "https://cdn.myanimelist.net/images/anime/5114t.jpg",
+     "large": "https://cdn.myanimelist.net/images/anime/5114l.jpg"
+    }
+   },
+   "list_status": {
+    "status": "plan_to_watch",
+    "score": 0,
+    "num_episodes_watched": 0,
+    "is_rewatching": false,
+    "updated_at": "2023-05-01T00:00:00+00:00"
+   }
+  },
+  {
+   "node": {
+    "id": 30276,
+    "title": "One Punch Man",
+    "main_picture": {
+     "medium": "https://cdn.myanimelist.net/images/anime/30276t.jpg",
+     "large": "https://cdn.myanimelist.net/images/anime/30276l.jpg"
+    }
+   },
+   "list_status": {
+    "status": "dropped",
+    "score": 4,
+    "num_episodes_watched": 6,
+    "is_rewatching": false,
+    "updated_at": "2022-01-01T00:00:00+00:00"
+   }
+  }
+ ],
+ "paging": {
+  "previous": "{{BASE}}/users/@me/animelist?offset=0&fields=list_status&limit=1000"
+ }
+}

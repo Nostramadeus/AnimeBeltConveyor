@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Small-size variant (32 px and 16 px): same drawing, fewer details, bigger shapes. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a3060"/>
+      <stop offset="1" stop-color="#0c0e1c"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7cf0ff"/>
+      <stop offset="0.5" stop-color="#8b9cff"/>
+      <stop offset="1" stop-color="#ff7ac8"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="64" fill="url(#bg)"/>
+  <!-- belt band -->
+  <rect x="24" y="168" width="208" height="60" rx="30" fill="#eef0f8"/>
+  <circle cx="60" cy="198" r="16" fill="#141733"/>
+  <circle cx="196" cy="198" r="16" fill="#141733"/>
+  <!-- the episode tile -->
+  <rect x="60" y="28" width="136" height="128" rx="30" fill="url(#tile)"/>
+  <path d="M104 58 L104 126 L164 92 Z" fill="#ffffff"/>
+</svg>

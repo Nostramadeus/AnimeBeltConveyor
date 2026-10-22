@@ -1,0 +1,41 @@
+{
+ "data": [
+  {
+   "node": {
+    "id": 52991,
+    "title": "Sousou no Frieren",
+    "main_picture": {
+     "medium": "https://cdn.myanimelist.net/images/anime/52991t.jpg",
+     "large": "https://cdn.myanimelist.net/images/anime/52991l.jpg"
+    }
+   },
+   "list_status": {
+    "status": "completed",
+    "score": 10,
+    "num_episodes_watched": 28,
+    "is_rewatching": false,
+    "updated_at": "2024-03-23T10:00:00+00:00"
+   }
+  },
+  {
+   "node": {
+    "id": 59978,
+    "title": "Sousou no Frieren 2nd Season",
+    "main_picture": {
+     "medium": "https://cdn.myanimelist.net/images/anime/59978t.jpg",
+     "large": "https://cdn.myanimelist.net/images/anime/59978l.jpg"
+    }
+   },
+   "list_status": {
+    "status": "watching",
+    "score": 0,
+    "num_episodes_watched": 3,
+    "is_rewatching": false,
+    "updated_at": "2026-01-30T15:20:00+00:00"
+   }
+  }
+ ],
+ "paging": {
+  "next": "{{BASE}}/users/@me/animelist?offset=2&fields=list_status&limit=1000"
+ }
+}

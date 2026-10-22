@@ -1,0 +1,57 @@
+[
+ {
+  "title": "Frieren: Beyond Journey's End Season 2",
+  "route": "sousou-no-frieren-2nd-season",
+  "romaji": "Sousou no Frieren 2nd Season",
+  "english": "Frieren: Beyond Journey's End Season 2",
+  "native": "葬送のフリーレン 第2期",
+  "delayedText": "",
+  "delayedFrom": "0001-01-01T00:00:00Z",
+  "delayedUntil": "0001-01-01T00:00:00Z",
+  "status": "Ongoing",
+  "episodeDate": "2026-10-24T16:30:00Z",
+  "episodeNumber": 4,
+  "subtractedEpisodeNumber": 0,
+  "episodes": 24,
+  "lengthMin": 24,
+  "donghua": false,
+  "airType": "dub",
+  "mediaTypes": [{"name": "TV", "route": "tv"}],
+  "imageVersionRoute": "anime/jpg/default/sousou-no-frieren-2nd-season-abc123.jpg",
+  "streams": {"crunchyroll": "crunchyroll.com/series/GG5H5XQX4"},
+  "airingStatus": "unaired"
+ },
+ {
+  "title": "Dandadan Season 2",
+  "route": "dandadan-season-2",
+  "romaji": "Dandadan 2nd Season",
+  "english": "DAN DA DAN Season 2",
+  "native": "ダンダダン 第2期",
+  "status": "Ongoing",
+  "episodeDate": "2026-10-23T15:00:00.000Z",
+  "episodeNumber": 16,
+  "episodes": 12,
+  "lengthMin": 24,
+  "donghua": false,
+  "airType": "dub",
+  "websites": {"official": "https://anime-dandadan.com/", "aniList": "anilist.co/anime/185660", "mal": "myanimelist.net/anime/60543"},
+  "airingStatus": "aired"
+ },
+ {
+  "title": "Kusuriya no Hitorigoto",
+  "route": "kusuriya-no-hitorigoto-2nd-season",
+  "romaji": "",
+  "english": "The Apothecary Diaries Season 2",
+  "status": "Delayed",
+  "delayedText": "Delayed",
+  "episodeDate": "0001-01-01T00:00:00Z",
+  "episodeNumber": "18",
+  "airType": "dub",
+  "aniListId": 176301,
+  "airingStatus": "delayed-air"
+ },
+ {
+  "route": "broken-entry",
+  "episodeNumber": {"weird": true}
+ }
+]

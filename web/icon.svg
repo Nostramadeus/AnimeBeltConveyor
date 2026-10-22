@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- AnimeBeltConveyor app icon. Dark glass tile, a conveyor belt with two rollers, one glowing episode tile riding on it. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#232852"/>
+      <stop offset="0.55" stop-color="#121529"/>
+      <stop offset="1" stop-color="#0a0b14"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7cf0ff"/>
+      <stop offset="0.5" stop-color="#8b9cff"/>
+      <stop offset="1" stop-color="#ff7ac8"/>
+    </linearGradient>
+    <linearGradient id="belt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f5fa"/>
+      <stop offset="1" stop-color="#c9cfe6"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <clipPath id="clip"><rect width="256" height="256" rx="58"/></clipPath>
+  </defs>
+
+  <rect width="256" height="256" rx="58" fill="url(#bg)"/>
+  <g clip-path="url(#clip)">
+    <!-- glass highlight, top left -->
+    <ellipse cx="70" cy="-10" rx="190" ry="120" fill="url(#sheen)"/>
+    <!-- soft accent light behind the tile -->
+    <rect x="80" y="58" width="96" height="92" rx="22" fill="url(#tile)" opacity="0.55" filter="url(#glow)"/>
+  </g>
+
+  <!-- belt band -->
+  <rect x="34" y="150" width="188" height="44" rx="22" fill="url(#belt)"/>
+  <!-- rollers -->
+  <circle cx="60" cy="172" r="11" fill="#141733"/>
+  <circle cx="128" cy="172" r="11" fill="#141733"/>
+  <circle cx="196" cy="172" r="11" fill="#141733"/>
+  <!-- belt shadow on the tile side -->
+  <rect x="34" y="150" width="188" height="44" rx="22" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="2"/>
+
+  <!-- the episode tile riding on the belt -->
+  <rect x="88" y="66" width="80" height="80" rx="18" fill="url(#tile)"/>
+  <rect x="88" y="66" width="80" height="80" rx="18" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
+  <!-- play mark -->
+  <path d="M117 86 L117 126 L151 106 Z" fill="#ffffff"/>
+
+  <!-- inner glass edge -->
+  <rect x="1" y="1" width="254" height="254" rx="57" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="2"/>
+</svg>

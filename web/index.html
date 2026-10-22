@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" data-theme="glass">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>AnimeBeltConveyor</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#view">Skip to content</a>
+
+<!-- Backdrop: blurred banner of the show touched last, plus grain and a soft light. Never carries text. -->
+<div class="backdrop" aria-hidden="true">
+  <div class="backdrop-img" id="backdrop-img"></div>
+  <div class="backdrop-shade"></div>
+  <div class="backdrop-grain"></div>
+</div>
+
+<nav class="rail glass" aria-label="Main">
+  <a class="rail-logo" href="#/" aria-label="AnimeBeltConveyor home">
+    <img src="icon.svg" alt="" class="logo" width="40" height="40">
+  </a>
+  <ul class="rail-nav" id="rail-nav">
+    <li><a href="#/" data-route="dashboard"><span class="ico" data-icon="home"></span><span class="rail-label">Home</span></a></li>
+    <li><a href="#/library" data-route="library"><span class="ico" data-icon="grid"></span><span class="rail-label">Library</span></a></li>
+    <li><a href="#/add" data-route="add"><span class="ico" data-icon="plus"></span><span class="rail-label">Add</span></a></li>
+    <li><a href="#/calendar" data-route="calendar"><span class="ico" data-icon="calendar"></span><span class="rail-label">Calendar</span></a></li>
+    <li><a href="#/settings" data-route="settings"><span class="ico" data-icon="gear"></span><span class="rail-label">Settings</span></a></li>
+  </ul>
+  <div class="rail-foot">
+    <span class="live-dot" id="live-dot" role="status" aria-live="polite" title="Live updates: connecting"><span class="sr-only" id="live-text">Live updates: connecting</span></span>
+  </div>
+</nav>
+
+<main id="view" class="view" tabindex="-1" aria-live="off"></main>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<dialog id="confirm" class="dialog surface">
+  <form method="dialog" class="dialog-body">
+    <h2 id="confirm-title">Confirm</h2>
+    <div id="confirm-text"></div>
+    <div class="dialog-actions">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn btn-danger" value="ok" id="confirm-ok">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<noscript><div class="surface noscript">AnimeBeltConveyor needs JavaScript.</div></noscript>
+<!-- folders.js and setup.js register on window.ABC_EXT; app.js runs them before boot -->
+<script src="folders.js" defer></script>
+<script src="setup.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>
