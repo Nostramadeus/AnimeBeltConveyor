@@ -18,23 +18,56 @@
   <div class="backdrop-grain"></div>
 </div>
 
-<nav class="rail glass" aria-label="Main">
-  <a class="rail-logo" href="#/" aria-label="AnimeBeltConveyor home">
-    <img src="icon.svg" alt="" class="logo" width="40" height="40">
+<!-- Top bar (SPEC-v1.2-ui.md 2). The glass lives on ::before so the nav inside can become a fixed bottom tab bar on phones. -->
+<header class="topbar">
+  <a class="tb-logo" href="#/" aria-label="AnimeBeltConveyor home">
+    <img src="icon.svg" alt="" class="logo" width="36" height="36">
+    <span class="tb-name"><span class="tb-name-long">AnimeBeltConveyor</span><span class="tb-name-short" aria-hidden="true">ABC</span></span>
   </a>
-  <ul class="rail-nav" id="rail-nav">
-    <li><a href="#/" data-route="dashboard"><span class="ico" data-icon="home"></span><span class="rail-label">Home</span></a></li>
-    <li><a href="#/library" data-route="library"><span class="ico" data-icon="grid"></span><span class="rail-label">Library</span></a></li>
-    <li><a href="#/add" data-route="add"><span class="ico" data-icon="plus"></span><span class="rail-label">Add</span></a></li>
-    <li><a href="#/calendar" data-route="calendar"><span class="ico" data-icon="calendar"></span><span class="rail-label">Calendar</span></a></li>
-    <li><a href="#/settings" data-route="settings"><span class="ico" data-icon="gear"></span><span class="rail-label">Settings</span></a></li>
-  </ul>
-  <div class="rail-foot">
-    <span class="live-dot" id="live-dot" role="status" aria-live="polite" title="Live updates: connecting"><span class="sr-only" id="live-text">Live updates: connecting</span></span>
+  <nav class="main-nav" id="main-nav" aria-label="Main">
+    <ul>
+      <li><a href="#/" data-route="home"><span class="ico" data-icon="home"></span><span class="nav-label">Home</span></a></li>
+      <li><a href="#/shows" data-route="shows"><span class="ico" data-icon="grid"></span><span class="nav-label">Shows</span></a></li>
+      <li><a href="#/calendar" data-route="calendar"><span class="ico" data-icon="calendar"></span><span class="nav-label">Calendar</span></a></li>
+      <li><a href="#/add" data-route="add"><span class="ico" data-icon="plus"></span><span class="nav-label">Add</span></a></li>
+      <li><a href="#/settings" data-route="settings"><span class="ico" data-icon="gear"></span><span class="nav-label">Settings</span></a></li>
+    </ul>
+  </nav>
+  <div class="tb-right">
+    <div class="tb-search" role="search">
+      <span class="ico tb-search-ico" data-icon="search"></span>
+      <label class="sr-only" for="gsearch">Search your shows or AniList</label>
+      <input class="input" id="gsearch" type="search" placeholder="Search your shows or AniList" autocomplete="off" spellcheck="false"
+        role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="gsearch-list">
+      <kbd class="tb-kbd" aria-hidden="true">/</kbd>
+      <ul class="gs-list surface" id="gsearch-list" role="listbox" aria-label="Search results" hidden></ul>
+    </div>
+    <button type="button" class="btn btn-icon btn-ghost tb-search-btn" id="search-toggle" aria-label="Search"><span class="ico" data-icon="search"></span></button>
+    <button type="button" class="btn tb-live" id="live-btn" aria-controls="drawer" aria-expanded="false" aria-label="Activity">
+      <span class="ico" data-icon="pulse"></span><span id="live-label">Live</span><span class="unread" id="live-unread" hidden>0</span>
+    </button>
+    <a class="tb-status" id="dl-status" href="#/settings?section=downloads" aria-label="Download status"><span class="dot" aria-hidden="true"></span></a>
   </div>
-</nav>
+</header>
 
 <main id="view" class="view" tabindex="-1" aria-live="off"></main>
+
+<!-- Activity drawer (SPEC-v1.2-ui.md 3.5) -->
+<div class="drawer-scrim" id="drawer-scrim" hidden></div>
+<aside class="drawer glass" id="drawer" aria-labelledby="drawer-h">
+  <div class="drawer-head">
+    <h2 id="drawer-h">Activity</h2>
+    <span class="chip" id="feed-live">Connecting…</span>
+    <span class="grow"></span>
+    <button type="button" class="btn btn-sm btn-ghost btn-icon drawer-pin" id="drawer-pin" aria-pressed="false" aria-label="Pin open"><span class="ico" data-icon="pin"></span></button>
+    <button type="button" class="btn btn-sm btn-ghost btn-icon" id="drawer-close" aria-label="Close activity"><span class="ico" data-icon="x"></span></button>
+  </div>
+  <div class="drawer-acts">
+    <button class="btn btn-sm" data-act="run-conveyor" title="Search nyaa.si now for every show with auto download on"><span class="ico" data-icon="bolt"></span>Run conveyor</button>
+    <button class="btn btn-sm" data-act="run-scan" title="Rescan your library folders now"><span class="ico" data-icon="refresh"></span>Scan folders</button>
+  </div>
+  <ul class="feed-list" id="feed-list"></ul>
+</aside>
 
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
@@ -50,9 +83,12 @@
 </dialog>
 
 <noscript><div class="surface noscript">AnimeBeltConveyor needs JavaScript.</div></noscript>
-<!-- folders.js and setup.js register on window.ABC_EXT; app.js runs them before boot -->
+<!-- These register on window.ABC_EXT; app.js runs them before boot -->
 <script src="folders.js" defer></script>
 <script src="setup.js" defer></script>
+<script src="shows.js" defer></script>
+<script src="home.js" defer></script>
+<script src="drawer.js" defer></script>
 <script src="app.js" defer></script>
 </body>
 </html>

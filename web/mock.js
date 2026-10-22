@@ -7,6 +7,7 @@
      &setup=1    ui.setup_done=false: the setup guide opens at boot (SPEC-v1.1 6.1)
      &missing=1  drive D: is unplugged, so the download folder D:\Anime is not reachable (6.4 banner)
      &nofiles=1  no files on disk and no "done" releases: Home shows "Nothing to play yet" (SPEC-v1.1 11)
+     &many=1     12 shows (6 more from the Fall 2026 pool on every list; still 3 with files, 2 missing) for grid screenshots (SPEC-v1.2 7)
    v1.1 (SPEC-v1.1 section 3): folders, fs/list, fs/suggest, folders/open, shows/{id}/open-folder and
    settings/test/magnet run against an in-memory folder list and a fake drive tree:
      C:\ (Users\You\Videos, Downloads\Torrents\watch, AppData\Roaming\abc, Apps\abc), D:\ (Anime, Games),
@@ -24,6 +25,7 @@
   const LOWDISK = P.get('lowdisk') === '1'; // SPEC-v1.1 10: D: has 1.8 GiB free, below min_free_gib 5
   // SPEC-v1.1 11: &nofiles=1 = nothing on disk (no files, no "done" releases), so Home shows "Nothing to play yet".
   const NOFILES = P.get('nofiles') === '1';
+  const MANY = P.get('many') === '1';
   const now = () => Math.floor(Date.now() / 1000);
   const T0 = now();
   const r30 = (t) => Math.round(t / 1800) * 1800;
@@ -168,6 +170,27 @@
     for (let n = 1; n <= 12; n++) addRelease(6, n, 'SubsPlease', '1080p', 300 + n * 17, 'candidate');
     addRelease(6, 3, 'SubsPlease', '1080p', 320, 'failed', { note: 'torrent is no longer in qBittorrent' });
     episodes[6].find((e) => e.number === 3).auto = 0;
+    if (MANY) {
+      // SPEC-v1.2 7: six more shows, none with files and none missing (caught up, paused, planning, dropped),
+      // so the grid fills up while Play next keeps 3 cards and Needs you keeps 2.
+      const pool = (aid) => SEASON_POOL.find((x) => x.anilist_id === aid);
+      const extra = [
+        [195516, 'watching', 4, [1, 4], 1 * D + 5 * H, -5 * H],
+        [195604, 'watching', 3, [1, 3], 3 * D + 1 * H, -26 * H],
+        [189123, 'watching', 2, [1, 2], 5 * D + 2 * H, -2 * D],
+        [210482, 'paused', 5, [1, 2], 2 * D + 6 * H, -12 * D],
+        [195539, 'planning', 10, null, -60 * D, -20 * D],
+        [178083, 'dropped', 8, [1, 3], 4 * D, -30 * D],
+      ];
+      extra.forEach(([aid, list, aired, watched, nextIn, activity], i) => {
+        const p = pool(aid);
+        const done = p.status === 'FINISHED';
+        buildShow({ id: 7 + i, anilist_id: aid, mal_id: null, title_romaji: p.title_romaji, title_english: p.title_english, title_native: null, synonyms: [], cover_url: p.cover_url, banner_url: p.banner_url, color: p.color,
+          format: p.format, status: p.status, season: p.season, season_year: p.season_year, episodes_total: p.episodes || (done ? aired : null), duration_min: 24, list_status: list, score: null, group: 'SubsPlease',
+          aired, lastAt: done ? r30(T0 + nextIn) : r30(T0 + nextIn - W), disk: null, watched, activity });
+      });
+      showSeq = 200;
+    }
     if (NOFILES) {
       files.length = 0;
       for (let i = releases.length - 1; i >= 0; i--) if (releases[i].status === 'done') releases.splice(i, 1);
@@ -191,6 +214,13 @@
       [ago(op.lastAt) - 46 * 60, 'release.added', 2, 1180, '[SubsPlease] One Piece - 1180 (1080p) added to qBittorrent'],
       [ago(op.lastAt) - 80 * 60, 'download.done', 2, 1180, 'Downloaded [SubsPlease] One Piece - 1180 (1080p)'],
       [ago(op.lastAt) - 81 * 60, 'file.found', 2, 1180, 'ONE PIECE 1180 is on disk'],
+      [3 * D + 40 * 60, 'episode.watched', 4, 11, 'Ao no Hako 11 marked watched'],
+      [3 * D + 39 * 60, 'episode.watched', 4, 12, 'Ao no Hako 12 marked watched'],
+      [3 * D + 38 * 60, 'episode.watched', 4, 13, 'Ao no Hako 13 marked watched'],
+      [3 * D + 37 * 60, 'episode.watched', 4, 14, 'Ao no Hako 14 marked watched'],
+      [10 * D + 3 * 60, 'release.found', 6, 1, 'Found 4 releases for [Oshi no Ko] 2nd Season - 01'],
+      [10 * D + 2 * 60, 'release.found', 6, 2, 'Found 3 releases for [Oshi no Ko] 2nd Season - 02'],
+      [10 * D + 1 * 60, 'release.found', 6, 3, 'Found 5 releases for [Oshi no Ko] 2nd Season - 03'],
       [2 * D + 3 * H, 'file.missing', 5, 3, 'File gone: [EMBER] Dungeon Meshi - 03 (1080p).mkv'],
       [2 * D, 'scan.done', null, null, 'Scan finished: 1,214 files, 1 missing, 0 new'],
       [ago(fr.lastAt) - 35 * 60, 'release.found', 1, 9, 'Found 4 releases for Sousou no Frieren - 09'],
@@ -772,5 +802,5 @@
     return new Response(JSON.stringify(res.body), { status: res.status, headers: { 'Content-Type': 'application/json' } });
   };
   window.__ABC_MOCK__ = { settings, shows, episodes, files, releases, events, emit, get folders() { return settings.library.folders; }, exists, downloadDir };
-  console.info('[ABC] mock backend active', [FRESH && 'fresh', SETUP && 'setup', MISSING && 'missing', LOWDISK && 'lowdisk', NOFILES && 'nofiles'].filter(Boolean).join(' '));
+  console.info('[ABC] mock backend active', [FRESH && 'fresh', SETUP && 'setup', MISSING && 'missing', LOWDISK && 'lowdisk', NOFILES && 'nofiles', MANY && 'many'].filter(Boolean).join(' '));
 })();

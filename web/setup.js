@@ -363,7 +363,7 @@
       actions: {
         'w-next': async () => {
           wErr('');
-          if (st.step === 5) { if (await markDone()) leaveTo(`Setup done. The conveyor runs every ${getPath(S.settings, 'conveyor.poll_interval_min') || 15} minutes; press Run conveyor to start now.`); return; }
+          if (st.step === 5) { if (await markDone()) leaveTo(`Setup done. The conveyor runs every ${getPath(S.settings, 'conveyor.poll_interval_min') || 15} minutes; to start now, open Live and press Run conveyor.`); return; }
           if (await savers[st.step]()) goStep(st.step + 1);
         },
         'w-back': () => goStep(st.step - 1),

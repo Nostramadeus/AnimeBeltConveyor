@@ -43,6 +43,22 @@
     cur[ks[ks.length - 1]] = v;
   }
   const clone = (o) => JSON.parse(JSON.stringify(o ?? null));
+  /** Selectors that find the focused element again after its region is re-rendered (null when focus is elsewhere).
+      An item inside a ⋯ menu falls back to that menu's button, since the menu is closed after a repaint. */
+  function focusKey(regions) {
+    const a = document.activeElement;
+    if (!a || a === document.body || !regions.some((r) => r && r.contains(a))) return null;
+    const out = [];
+    if (a.id) out.push('#' + CSS.escape(a.id));
+    if (a.dataset.act) out.push(`[data-act="${a.dataset.act}"]${a.dataset.ep ? `[data-ep="${a.dataset.ep}"]` : ''}${a.dataset.file ? `[data-file="${a.dataset.file}"]` : ''}`);
+    if (a.dataset.menu) out.push(`[data-menu="${a.dataset.menu}"]`);
+    if (a.dataset.pickToggle) out.push(`[data-pick-toggle="${a.dataset.pickToggle}"]`);
+    const pop = a.closest('.menu-pop');
+    if (pop && pop.id) out.push(`[data-menu="${pop.id}"]`);
+    return out.length ? out : null;
+  }
+  /** Focus the first visible element matching any selector, in order. */
+  const focusFirst = (...sels) => { for (const sel of sels) { const el = $$(sel).find((x) => x.getClientRects().length > 0); if (el) { el.focus(); return el; } } return null; };
   const store = {
     get(k) { try { return JSON.parse(localStorage.getItem('abc.' + k)); } catch { return null; } },
     set(k, v) { try { localStorage.setItem('abc.' + k, JSON.stringify(v)); } catch { /* storage off */ } },
@@ -88,6 +104,15 @@
     if (Math.abs(dd) <= 1) return `${cap(F.rel.format(dd, 'day'))} ${t}`;
     if (Math.abs(dd) < 7) return `${F.wd.format(toDate(ts))} ${t}`;
     return `${F.md.format(toDate(ts))}, ${t}`;
+  }
+  /** Episode table "Aired": "Yesterday · 11:26 PM", "Thu · 11:26 PM" within 7 days, else "Jul 2 · 11:26 PM". */
+  function fAired(ts) {
+    if (!ts) return '';
+    const dd = dayDiff(ts);
+    const t = fTime(ts);
+    if (Math.abs(dd) <= 1) return `${cap(F.rel.format(dd, 'day'))} · ${t}`;
+    if (Math.abs(dd) < 7) return `${F.wd.format(toDate(ts))} · ${t}`;
+    return `${F.md.format(toDate(ts))} · ${t}`;
   }
   function fSize(b) {
     if (b == null) return '';
@@ -250,6 +275,10 @@
     up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>',
     folderPlus: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>',
     compass: '<circle cx="12" cy="12" r="8.5"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
+    chevD: '<path d="M5.5 9.5 12 16l6.5-6.5"/>',
+    more: '<circle cx="5.5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
+    pulse: '<path d="M2.5 12h4l2.5-6.5 4.5 13 2.5-6.5h5.5"/>',
+    pin: '<path d="M9 3.5h6l-1 6 3.5 3.5h-11L10 9.5z"/><path d="M12 13v7.5"/>',
   };
   const svg = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name] || ''}</svg>`;
   const ico = (name, cls = '') => raw(`<span class="ico ${cls}">${svg(name)}</span>`);
@@ -438,6 +467,19 @@
       <span class="sr-only">${label}</span>
     </a>`;
   }
+  /** SPEC-v1.2 3.4 week entry: poster thumb, title, status dot + "Ep 17 · 11:26 PM" (Home strip + Calendar agenda). */
+  function weekEntry(c) {
+    const [cls, label] = calState(c.it);
+    const show = S.showsById[c.it.show_id] || {};
+    const title = c.it.title || showTitle(show);
+    return h`<a class="wk-ep ${cls === 's-watched' ? 'is-watched' : ''}" href="#/show/${c.it.show_id}" title="${title} · episode ${c.it.episode}${c.dub ? ' (dub)' : ''} · ${fFull(c.ts)} · ${label}">
+      <img class="wk-thumb" src="${safeUrl(show.cover_url)}" alt="" loading="lazy">
+      <span class="wk-t">${title}</span>
+      <span class="wk-m"><span class="dot ${cls}" aria-hidden="true"></span>Ep ${c.it.episode}${c.dub ? ' dub' : ''}</span>
+      <span class="wk-time">${fTime(c.ts)}</span>
+      <span class="sr-only">${label}</span>
+    </a>`;
+  }
   const stateLegend = () => h`<div class="legend" aria-label="Legend">
     <span><i class="dot s-aired"></i>Aired, not found</span><span><i class="dot s-dl"></i>Downloading</span>
     <span><i class="dot s-disk"></i>On disk</span><span><i class="dot s-watched"></i>Watched</span><span><i class="dot s-future"></i>Upcoming</span></div>`;
@@ -458,53 +500,8 @@
   // ------------------------------------------------------------------ views
   const Views = {};
 
-  // ---------- Dashboard  #/
-  Views.dashboard = () => ({
-    title: 'Home', nav: 'dashboard',
-    async load() {
-      const ws = weekStart(0);
-      const from = Math.floor(ws / 1000); const to = from + 7 * 86400;
-      const [state, upnext, shows, cal, events, settings, missing] = await Promise.all([
-        API.state(), soft(API.upnext(), []), soft(API.shows(), []), soft(API.calendar(from, to), []), soft(API.events(undefined, 60), []), S.settings ? Promise.resolve(S.settings) : soft(API.settings(), null).then((r) => r.v),
-        soft(API.missing(), []), // SPEC-v1.1 11; an older server (404) just keeps the "caught up" hero
-      ]);
-      if (settings) S.settings = settings;
-      S.state = state;
-      indexShows(shows.v);
-      mergeEvents(events.v);
-      return { state, upnext, shows, cal, events, ws, from, to, missing: Array.isArray(missing.v) ? missing.v : [] };
-    },
-    render(D, first) {
-      const upnext = D.upnext.v || [];
-      const hero = upnext[0];
-      if (hero) touchShow({ ...(S.showsById[hero.show_id] || {}), ...hero });
-      else if (!S.last) paintFromLast();
-      const dd = D.state.download_dir;
-      const notices = [dd && dd.exists === false ? unreachableBanner(dd, first) : '', lowDisk(dd) ? lowDiskBanner(dd, first) : '', needsSetup(D) ? setupCard(D, first) : ''].filter(Boolean);
-      return h`<div class="dash">
-        <header class="page-head glass ${A(first)}">
-          <h1>Home</h1>
-          <div class="actions">
-            <button class="btn btn-sm" data-act="run-conveyor" title="Search nyaa.si now for every show with auto download on">${ico('bolt')}Run conveyor</button>
-            <button class="btn btn-sm" data-act="run-scan" title="Rescan your library folders now">${ico('refresh')}Scan folders</button>
-            ${dd && dd.exists ? h`<button class="btn btn-sm" data-act="open-dir" data-dir="${dd.path}" title="${dd.path}">${ico('folder')}Open folder</button>` : ''}
-          </div>
-        </header>
-        ${notices.length ? h`<div class="notices">${notices}</div>` : ''}
-        ${hero ? heroBlock(hero, S.showsById[hero.show_id], first) : heroEmpty(D, first)}
-        ${statTiles(D.state, first)}
-        ${feedPanel(first)}
-        ${upnextRail(upnext, D.upnext, first)}
-        ${weekStrip(D, first)}
-      </div>`;
-    },
-    mount(root) {
-      const wg = $('.week-grid', root); const t = wg && $('.day.is-today', wg);
-      if (t && wg.scrollWidth > wg.clientWidth) wg.scrollLeft = t.offsetLeft;
-    },
-    refreshOn: () => true,
-  });
-
+  // ---------- Home (home.js), Shows (shows.js), activity drawer (drawer.js) register on ABC_EXT.
+  // Shared pieces they use live here: indexShows, setup card, notices.
   function indexShows(list) {
     if (!Array.isArray(list)) return;
     S.showsById = {};
@@ -520,37 +517,18 @@
     const mode = st.downloader && st.downloader.mode;
     return st.download_dir == null || (mode === 'manual' && !hasAnyShow(st));
   }
-  function setupCard(D, first) {
-    const st = D.state;
+  /** The three setup steps as [done, label] (home.js renders them as a Needs you card). */
+  function setupTodo(st) {
     const mode = st.downloader && st.downloader.mode;
-    const todo = [
+    return [
       ['download_dir' in st ? st.download_dir != null : st.root_ok !== false, 'Pick where episodes go'],
       [!!mode && mode !== 'manual', 'Choose the app that downloads'],
       [hasAnyShow(st), 'Add a show'],
     ];
-    const left = todo.filter(([done]) => !done).length;
-    return h`<section class="setup surface ${A(first)}" aria-labelledby="setup-h">
-      <div class="setup-text">
-        <h2 id="setup-h">Finish setting up</h2>
-        <p class="small muted">${left ? `${plural(left, 'step')} left. The guide takes about two minutes.` : 'All set.'}</p>
-      </div>
-      <ul class="setup-todo">${todo.map(([done, label]) => h`<li class="${done ? 'is-done' : ''}"><span class="step-n" aria-hidden="true">${done ? ico('check') : ''}</span>${label}<span class="sr-only">${done ? ': done' : ': to do'}</span></li>`)}</ul>
-      <a class="btn btn-primary" href="#/setup">${ico('compass')}Open the setup guide</a>
-    </section>`;
-  }
-  function unreachableBanner(dd, first) {
-    return h`<section class="banner surface ${A(first)}" role="alert">
-      <span class="banner-ico">${ico('alert')}</span>
-      <p>Download folder <b class="mono">${dd.path}</b> is not reachable. Plug the drive in, or pick another folder.</p>
-      <div class="banner-acts">
-        <button class="btn btn-sm" data-act="retry-state">${ico('refresh')}Retry</button>
-        <a class="btn btn-sm" href="#/settings?section=library">${ico('folder')}Pick folder</a>
-      </div>
-    </section>`;
   }
 
   /** SPEC-v1.1 10: free space on the download drive is below conveyor.min_free_gib (0 = off). Servers without
-      free_bytes (null / missing) show nothing; an unreachable folder has its own banner. */
+      free_bytes (null / missing) show nothing; an unreachable folder has its own card. */
   const GIB = 1024 ** 3;
   function lowDisk(dd) {
     const c = (S.settings && S.settings.conveyor) || {};
@@ -565,301 +543,22 @@
     const m = s.match(/^[A-Za-z]:/) || s.match(/^\\\\[^\\]+\\[^\\]+/);
     return m ? m[0] : s;
   }
-  function lowDiskBanner(dd, first) {
-    const free = Math.max(0, dd.free_bytes) / GIB;
-    return h`<section class="banner surface ${A(first)}" role="status" data-banner="lowdisk">
-      <span class="banner-ico">${ico('alert')}</span>
-      <p>Only ${free.toFixed(1)} GiB free on <b class="mono">${driveOf(dd.path)}</b>. Automatic downloads are paused until there is more room.</p>
-      <div class="banner-acts">
-        <button class="btn btn-sm" data-act="open-dir" data-dir="${dd.path}" title="${dd.path}">${ico('folder')}Open folder</button>
-      </div>
-    </section>`;
-  }
-
-  function heroBlock(e, show, first) {
-    const f = e.file;
-    const p = progressOf(show);
-    const title = showTitle(show || e);
-    return h`<section class="hero ${A(first)}" aria-label="Up next">
-      <div class="hero-art" data-bg="${e.banner_url || (show && show.banner_url) || ''}"></div>
-      <div class="hero-scrim"></div>
-      <div class="hero-card glass-hero">
-        <img class="hero-poster" src="${safeUrl(e.cover_url || (show && show.cover_url))}" alt="" loading="eager">
-        <div class="hero-main">
-          <div class="hero-eyebrow"><span class="bar"></span>Up next</div>
-          <h2 class="hero-title"><a href="#/show/${e.show_id}">${title}</a></h2>
-          <p class="hero-ep"><b>Episode ${e.number}</b>${e.title ? h` · ${e.title}` : ''}</p>
-        </div>
-        <div class="hero-extra">
-          <div class="hero-chips">
-            ${f && f.release_group ? h`<span class="chip">${f.release_group}</span>` : ''}
-            ${f && f.resolution ? h`<span class="chip">${f.resolution}</span>` : ''}
-            ${f && f.version > 1 ? h`<span class="chip">v${f.version}</span>` : ''}
-            ${e.aired_at ? h`<span class="chip" title="${fFull(e.aired_at)}">Aired ${fRel(e.aired_at)}</span>` : ''}
-            ${show ? h`<span class="chip">${fNum(p.watched)} of ${p.total ? fNum(p.total) : fNum(p.aired)} watched</span>` : ''}
-          </div>
-          <div class="hero-actions">
-            ${f ? h`<button class="btn btn-primary" data-act="play" data-file="${f.id}" data-show="${e.show_id}" data-label="episode ${e.number}">${ico('play')}Play</button>` : ''}
-            <button class="btn" data-act="watched" data-show="${e.show_id}" data-ep="${e.number}" data-val="1">${ico('check')}Mark watched</button>
-            ${f ? h`<button class="btn" data-act="reveal" data-file="${f.id}">${ico('folder')}Reveal</button>` : ''}
-          </div>
-        </div>
-      </div>
-    </section>`;
-  }
-
-  function heroEmpty(D, first) {
-    const shows = Object.values(S.showsById);
-    const next = shows.filter((s) => s.list_status === 'watching' && s.next && s.next.aired_at).sort((a, b) => a.next.aired_at - b.next.aired_at)[0];
-    let body;
-    const miss = (D.missing || []).filter((x) => x && x.count > 0);
-    if (!shows.length) body = emptyBox('tv', 'No shows yet', 'Add a show and ABC will fetch new episodes as they air.', h`<a class="btn btn-primary" href="#/add">${ico('plus')}Add a show</a>`);
-    else if (miss.length) {
-      // SPEC-v1.1 11: nothing on disk, but aired episodes have no file. Never claim "caught up" then.
-      const top = miss[0];
-      const name = (x) => x.title || showTitle(S.showsById[x.show_id]);
-      const span = (x) => (x.first_episode === x.last_episode ? `${x.first_episode}` : `${x.first_episode}-${x.last_episode}`);
-      const n = miss.reduce((a, x) => a + x.count, 0);
-      const list = miss.slice(0, 3).map((x, i) => h`${i ? ', ' : ''}<b>${name(x)}</b> ${span(x)}`);
-      const more = miss.length > 3 ? ` and ${fNum(miss.length - 3)} more` : '';
-      body = emptyBox('download', 'Nothing to play yet', h`<span data-missing-line>${plural(n, 'aired episode')} ${n === 1 ? 'has' : 'have'} no file: ${list}${more}</span>`,
-        h`<div class="empty-acts">
-          <button class="btn btn-primary" data-act="hero-download-missing" data-show="${top.show_id}" aria-label="Download all missing episodes of ${name(top)}">${ico('download')}Download all missing</button>
-          <a class="btn btn-open-show" href="#/show/${top.show_id}" title="Open ${name(top)}">${ico('chevR')}<span class="ellipsis">Open ${name(top)}</span></a>
-        </div>`);
-    } else if (next) body = emptyBox('clock', 'You are caught up', h`Next: <b>${showTitle(next)}</b> episode ${next.next.episode}, ${fWhen(next.next.aired_at)} (${fRel(next.next.aired_at)}).`, h`<a class="btn" href="#/calendar">${ico('calendar')}Open calendar</a>`);
-    else body = emptyBox('check', 'You are caught up', 'Nothing unwatched on disk and nothing scheduled.', '');
-    return h`<section class="hero-empty glass ${A(first)}" aria-label="Up next">${body}${D.upnext.err ? softErr(D.upnext, 'Up next') : ''}</section>`;
-  }
-
-  function statTiles(st, first) {
-    const c = st.counts || {};
-    const qb = st.qbit || {};
-    const dl = st.downloader;
-    const DL_TILE = {
-      qbittorrent: ['qBittorrent', dl && dl.ok ? ['s-disk', 'Connected', 'Downloads go to qBittorrent'] : ['s-bad', 'Not connected', 'Magnet links only until it is back']],
-      magnet: ['Torrent app', dl && dl.ok ? ['s-disk', 'Magnet links', 'Sent to your torrent app'] : ['s-bad', 'No magnet app', (dl && dl.error) || 'No app opens magnet links']],
-      torrent_file: ['Watch folder', dl && dl.ok ? ['s-disk', 'Ready', '.torrent files go to the watch folder'] : ['s-bad', 'Folder missing', (dl && dl.error) || 'The watch folder is not reachable']],
-      manual: ['Downloads', ['s-aired', 'By hand', 'You add magnet links yourself']],
-    };
-    const tile = dl && DL_TILE[dl.mode];
-    const qLabel = tile ? tile[0] : 'qBittorrent';
-    const qState = tile ? tile[1] : qb.connected ? ['s-disk', 'Connected', 'Downloads go to qBittorrent'] : qb.enabled ? ['s-bad', 'Not connected', 'Magnet links only until it is back'] : ['s-aired', 'Off', 'Magnet links only'];
-    return h`<div class="stats">
-      <a class="stat glass ${A(first)}" href="#/library"><span class="stat-label">${ico('tv')}Watching</span><span class="stat-value">${fNum(c.watching ?? 0)}</span><span class="stat-sub">shows on your list</span></a>
-      <div class="stat glass ${A(first)}"><span class="stat-label">${ico('disk')}On disk, unwatched</span><span class="stat-value">${fNum(c.on_disk_unwatched ?? 0)}</span><span class="stat-sub">${c.missing > 0 ? `ready to play · ${fNum(c.missing)} aired without a file` : 'episodes ready to play'}</span></div>
-      <a class="stat glass ${A(first)}" href="#/calendar"><span class="stat-label">${ico('calendar')}Airing this week</span><span class="stat-value">${fNum(c.airing_this_week ?? 0)}</span><span class="stat-sub">episodes</span></a>
-      <a class="stat glass ${A(first)}" href="#/settings?section=${dl ? 'downloads' : 'qbit'}"><span class="stat-label">${ico('plug')}${qLabel}</span><span class="stat-value is-text"><span class="dot ${qState[0]}"></span>${qState[1]}</span><span class="stat-sub">${qState[2]}</span></a>
-    </div>`;
-  }
-
-  function feedPanel(first) {
-    return h`<section class="feed surface panel ${A(first)}" aria-labelledby="feed-h">
-      <div class="panel-head"><h2 id="feed-h">Conveyor</h2><span class="chip" id="feed-live">${liveLabel()}</span></div>
-      ${S.events.length ? h`<ul class="feed-list" id="feed-list">${S.events.slice(0, 60).map((ev) => feedItem(ev, false))}</ul>` : h`<div id="feed-list-empty">${emptyBox('bolt', 'Nothing yet', 'Searches, downloads, new files and watched episodes show up here as they happen.', '')}</div><ul class="feed-list" id="feed-list"></ul>`}
-    </section>`;
-  }
-  const KIND = {
-    'show.added': ['plus', 'k-acc'], 'show.removed': ['x', ''], 'airing.updated': ['calendar', ''],
-    'release.found': ['search', ''], 'release.added': ['download', 'k-warn'], 'release.waiting': ['clock', ''], 'release.skipped': ['skip', ''],
-    'download.done': ['check', 'k-ok'], 'download.failed': ['alert', 'k-bad'], 'file.found': ['file', 'k-ok'], 'file.missing': ['alert', 'k-warn'],
-    'episode.watched': ['eye', 'k-acc'], 'episode.unwatched': ['eyeOff', ''], 'push.ok': ['upload', 'k-ok'], 'push.failed': ['alert', 'k-bad'],
-    'scan.done': ['folder', ''], error: ['alert', 'k-bad'],
-  };
-  function feedItem(ev, isNew) {
-    const [icon, tone] = KIND[ev.kind] || ['bolt', ''];
-    const show = ev.show_id ? S.showsById[ev.show_id] : null;
-    const msg = ev.message || ev.kind;
-    const low = msg.toLowerCase();
-    const named = show && [show.title, show.title_romaji, show.title_english].some((t) => t && low.includes(t.toLowerCase()));
-    return h`<li class="feed-item ${isNew ? 'is-new' : ''}" data-id="${ev.id}">
-      <span class="feed-icon ${tone}" title="${ev.kind}">${ico(icon)}</span>
-      <div><div class="feed-msg">${named ? h`<a href="#/show/${show.id}">${msg}</a>` : msg}</div>
-      <div class="feed-meta">${show && !named ? h`<a href="#/show/${show.id}">${showTitle(show)}</a> · ` : ''}<time datetime="${new Date(ev.ts * 1000).toISOString()}" title="${fFull(ev.ts)}">${fRel(ev.ts)}</time></div></div>
-    </li>`;
-  }
-
-  function upnextRail(list, r, first) {
-    return h`<section class="upnext surface panel ${A(first)}" aria-labelledby="upnext-h">
-      <div class="panel-head"><h2 id="upnext-h">Up next<span class="count">${list.length || ''}</span></h2><a class="btn btn-sm btn-ghost" href="#/library">Library ${ico('chevR')}</a></div>
-      ${softErr(r, 'Up next')}
-      ${list.length ? h`<div class="rail-scroll" role="list">${list.map((e, i) => epCard(e, i === 0))}</div>`
-        : emptyBox('disk', 'Nothing waiting on disk', 'Episodes appear here when they are downloaded and not yet watched.', '')}
-    </section>`;
-  }
-  function epCard(e, isHero) {
-    const show = S.showsById[e.show_id];
-    const f = e.file;
-    return h`<article class="ep-card ${isHero ? 'is-hero' : ''}" role="listitem">
-      <a href="#/show/${e.show_id}" tabindex="-1" aria-hidden="true"><img class="poster-thumb" src="${safeUrl(e.cover_url || (show && show.cover_url))}" alt="" loading="lazy"></a>
-      <div class="ep-card-body">
-        <a class="ep-card-title clamp2" href="#/show/${e.show_id}">${showTitle(show || e)}</a>
-        <div class="ep-card-ep">Episode ${e.number}${f && (f.release_group || f.resolution) ? h` · ${[f.release_group, f.resolution].filter(Boolean).join(' ')}` : ''}</div>
-        ${show ? progBar(show) : ''}
-        <div class="ep-card-actions">
-          ${f ? h`<button class="btn btn-sm btn-primary" data-act="play" data-file="${f.id}" data-show="${e.show_id}" data-label="episode ${e.number}">${ico('play')}Play</button>` : ''}
-          <button class="btn btn-sm" data-act="watched" data-show="${e.show_id}" data-ep="${e.number}" data-val="1" title="Mark episode ${e.number} watched">${ico('check')}Watched</button>
-        </div>
-      </div>
-    </article>`;
-  }
-
-  function weekStrip(D, first) {
-    const days = weekDays(D.ws);
-    const chips = calChips(D.cal.v).filter((c) => c.ts >= D.from && c.ts < D.to);
-    const byDay = {};
-    for (const c of chips) (byDay[dayKey(toDate(c.ts))] ||= []).push(c);
-    const today = dayKey(new Date());
-    return h`<section class="week surface panel ${A(first)}" aria-labelledby="week-h">
-      <div class="panel-head"><h2 id="week-h">This week</h2><a class="btn btn-sm btn-ghost" href="#/calendar">Calendar ${ico('chevR')}</a></div>
-      ${softErr(D.cal, 'The calendar')}
-      <div class="week-grid">
-        ${days.map((d) => {
-          const k = dayKey(d); const list = byDay[k] || [];
-          return h`<div class="day ${k === today ? 'is-today' : ''}" ${k === today ? raw('aria-current="date"') : ''}>
-            <div class="day-head"><span>${F.wd.format(d)}</span><b>${F.day.format(d)}</b></div>
-            ${list.length ? list.map((c) => epChip(c)) : h`<span class="day-empty">Nothing airs</span>`}
-          </div>`;
-        })}
-      </div>
-      <div style="margin-top:12px">${stateLegend()}</div>
-    </section>`;
-  }
-
-  // ---------- Library  #/library
-  const LIST_TABS = [['watching', 'Watching'], ['planning', 'Planning'], ['completed', 'Completed'], ['paused', 'Paused'], ['dropped', 'Dropped'], ['all', 'All']];
-  Views.library = (m, params) => {
-    const st = { tab: params.get('tab') || store.get('libTab') || 'watching', q: '', sort: store.get('libSort') || 'activity', shows: [] };
-    if (!LIST_TABS.some(([k]) => k === st.tab)) st.tab = 'watching';
-    const filtered = () => {
-      const needle = st.q.trim().toLowerCase();
-      let list = st.shows.filter((s) => st.tab === 'all' || s.list_status === st.tab);
-      if (needle) list = list.filter((s) => [s.title, s.title_romaji, s.title_english].some((t) => t && t.toLowerCase().includes(needle)));
-      const by = {
-        activity: (a, b) => (b.last_activity || 0) - (a.last_activity || 0),
-        title: (a, b) => showTitle(a).localeCompare(showTitle(b), undefined, { sensitivity: 'base' }),
-        next: (a, b) => ((a.next && a.next.aired_at) || Infinity) - ((b.next && b.next.aired_at) || Infinity),
-      }[st.sort];
-      return list.slice().sort(by);
-    };
-    const tabsHtml = () => h`${LIST_TABS.map(([k, label]) => {
-      const n = k === 'all' ? st.shows.length : st.shows.filter((s) => s.list_status === k).length;
-      return h`<button class="tab" role="tab" id="tab-${k}" aria-selected="${String(st.tab === k)}" aria-controls="lib-grid" tabindex="${st.tab === k ? 0 : -1}" data-tab="${k}">${label}<span class="n">${n}</span></button>`;
-    })}`;
-    const gridHtml = () => {
-      if (!st.shows.length) return emptyBox('tv', 'Your library is empty', 'Track a show from AniList search or this season, or import your list.', h`<a class="btn btn-primary" href="#/add">${ico('plus')}Add shows</a>`);
-      const list = filtered();
-      if (!list.length) {
-        return st.q ? emptyBox('search', `No match for "${st.q}"`, 'Try another title, romaji or English.', '')
-          : emptyBox('list', `Nothing in ${LIST_TABS.find(([k]) => k === st.tab)[1]}`, 'Change a show\'s list status on its page to move it here.', '');
-      }
-      return h`<div class="poster-grid">${list.map(posterCard)}</div>`;
-    };
-    const paintGrid = (root) => { $('#lib-grid', root).innerHTML = String(gridHtml()); $('#lib-tabs', root).innerHTML = String(tabsHtml()); };
-    return {
-      title: 'Library', nav: 'library',
-      async load() { const shows = await API.shows(); indexShows(shows); st.shows = shows || []; return st; },
-      render(_d, first) {
-        return h`<div class="page">
-          <header class="page-head glass ${A(first)}" data-keep>
-            <h1>Library</h1>
-            <div class="lib-tools">
-              <div class="search"><label class="sr-only" for="lib-q">Search your library</label>${ico('search')}<input class="input" id="lib-q" type="search" placeholder="Search your library" value="${st.q}" autocomplete="off"></div>
-              <label class="sr-only" for="lib-sort">Sort</label>
-              <select class="select" id="lib-sort">
-                <option value="activity" ${st.sort === 'activity' ? raw('selected') : ''}>Sort: last activity</option>
-                <option value="title" ${st.sort === 'title' ? raw('selected') : ''}>Sort: title</option>
-                <option value="next" ${st.sort === 'next' ? raw('selected') : ''}>Sort: next airing</option>
-              </select>
-            </div>
-          </header>
-          <section class="surface panel ${A(first)}">
-            <div class="tabs" role="tablist" aria-label="List status" id="lib-tabs" style="margin-bottom:18px">${tabsHtml()}</div>
-            <div id="lib-grid" role="tabpanel" aria-labelledby="tab-${st.tab}">${gridHtml()}</div>
-          </section>
-        </div>`;
-      },
-      mount(root) {
-        if (S.last) paintFromLast();
-        const qIn = $('#lib-q', root);
-        qIn.addEventListener('input', debounce(() => { st.q = qIn.value; $('#lib-grid', root).innerHTML = String(gridHtml()); }, 120));
-        $('#lib-sort', root).addEventListener('change', (e) => { st.sort = e.target.value; store.set('libSort', st.sort); $('#lib-grid', root).innerHTML = String(gridHtml()); });
-        const tabs = $('#lib-tabs', root);
-        const pick = (k, focus) => {
-          st.tab = k; store.set('libTab', k);
-          history.replaceState(null, '', `#/library?tab=${k}`);
-          paintGrid(root);
-          $('#lib-grid', root).setAttribute('aria-labelledby', `tab-${k}`);
-          if (focus) $(`#tab-${k}`, root).focus();
-        };
-        tabs.addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) pick(b.dataset.tab, false); });
-        tabs.addEventListener('keydown', (e) => {
-          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
-          e.preventDefault();
-          const keys = LIST_TABS.map(([k]) => k); const i = keys.indexOf(st.tab);
-          const j = e.key === 'Home' ? 0 : e.key === 'End' ? keys.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + keys.length) % keys.length;
-          pick(keys[j], true);
-        });
-        bindTilt($('#lib-grid', root));
-      },
-      async refresh(root) { const shows = await API.shows(); indexShows(shows); st.shows = shows || []; paintGrid(root); },
-      refreshOn: (ev) => /^(show|file|episode|download|airing)\./.test(ev.kind),
-    };
-  };
-  function posterCard(s) {
-    const g = progressOf(s);
-    const complete = (g.total && g.watched >= g.total) || (s.status === 'FINISHED' && g.aired > 0 && g.watched >= g.aired);
-    const sub = s.next && s.next.aired_at ? `Ep ${s.next.episode} · ${fWhen(s.next.aired_at)}` : STATUS_LABEL[s.status] || pretty(s.status);
-    const color = isHex(s.color) ? s.color : '';
-    return h`<a class="poster" href="#/show/${s.id}" ${color ? raw(`style="--c:${color}"`) : ''} aria-label="${showTitle(s)}: ${g.onDisk} of ${g.aired} aired episodes on disk, ${g.watched} watched${complete ? ', complete' : ''}">
-      <div class="poster-frame">
-        <img src="${safeUrl(s.cover_url)}" alt="" loading="lazy">
-        <span class="badge" title="On disk / aired">${fNum(g.onDisk)}<span class="of">/ ${fNum(g.aired)}</span></span>
-        ${complete ? h`<span class="tick" title="Watched to the end">${ico('check')}</span>` : ''}
-      </div>
-      <div class="poster-title clamp2">${showTitle(s)}</div>
-      <div class="poster-sub">${sub}</div>
-    </a>`;
-  }
-  /** Poster hover tilt. Total tilt angle capped at 8 degrees; off for reduced motion and touch. */
-  function bindTilt(grid) {
-    const MAX = 8;
-    const fine = matchMedia('(hover: hover) and (pointer: fine)');
-    let cur = null;
-    const reset = (el) => { if (el) { el.style.removeProperty('--rx'); el.style.removeProperty('--ry'); } };
-    grid.addEventListener('pointermove', (e) => {
-      if (!fine.matches || !motionOK()) return;
-      const poster = e.target.closest('.poster');
-      const frame = poster ? $('.poster-frame', poster) : null;
-      if (frame !== cur) { reset(cur); cur = frame; }
-      if (!frame) return;
-      const r = frame.getBoundingClientRect();
-      const dx = clamp(((e.clientX - r.left) / r.width) * 2 - 1, -1, 1);
-      const dy = clamp(((e.clientY - r.top) / r.height) * 2 - 1, -1, 1);
-      let rx = -dy * MAX; let ry = dx * MAX;
-      const mag = Math.hypot(rx, ry);
-      if (mag > MAX) { rx = (rx / mag) * MAX; ry = (ry / mag) * MAX; }
-      const t2 = (n) => (Math.trunc(n * 100) / 100).toFixed(2); // truncate, so rounding never pushes past 8 degrees
-      frame.style.setProperty('--rx', `${t2(rx)}deg`);
-      frame.style.setProperty('--ry', `${t2(ry)}deg`);
-      frame.style.setProperty('--mx', `${(((dx + 1) / 2) * 100).toFixed(1)}%`);
-      frame.style.setProperty('--my', `${(((dy + 1) / 2) * 100).toFixed(1)}%`);
-    });
-    grid.addEventListener('pointerleave', () => { reset(cur); cur = null; });
-  }
+  const LIST_TABS = [['watching', 'Watching'], ['paused', 'Paused'], ['planning', 'Planning'], ['completed', 'Completed'], ['dropped', 'Dropped']];
 
   // ---------- Show  #/show/{id}
   Views.show = (m) => {
     const id = Number(m[1]);
-    const st = { showAll: false, detail: null, preview: null };
+    const st = { showAll: false, detail: null, preview: null, openPicks: new Set() };
     const dynHead = () => showHead(st.detail, st.preview);
     const dynBody = () => showBody(st.detail, st);
     const reload = () => rerender(); // keeps the scroll position
     /** Repaint header + episode list from st (the settings panel and its inputs stay). */
     const paintParts = (root = $('#view')) => {
       const head = $('#show-head', root); const body = $('#show-body', root);
+      const keep = focusKey([head, body]); // a background refresh must not drop keyboard focus
       if (head) { head.innerHTML = String(dynHead()); hydrate(head); }
       if (body) { body.innerHTML = String(dynBody()); hydrate(body); }
+      if (keep) focusFirst(...keep);
     };
     /** SPEC-v1.1 11: POST watched-through, repaint from the returned ShowDetail, toast, then put focus back on
         the first element matching `focusSel` (the row button may be gone once its prefix is watched). */
@@ -877,7 +576,7 @@
       if (again) again.focus();
     };
     return {
-      title: 'Show', nav: 'library',
+      title: 'Show', nav: 'shows',
       async load() {
         const [detail, settings, prev] = await Promise.all([API.show(id), S.settings ? Promise.resolve(S.settings) : soft(API.settings(), null).then((r) => r.v), soft(API.missingPreview(id), null)]);
         if (settings) S.settings = settings;
@@ -889,7 +588,7 @@
         this.title = showTitle(d.show);
         document.title = `${this.title} · ABC`;
         return h`<div class="page">
-          <div><a class="crumb" href="#/library">${ico('chevL')}Library</a></div>
+          <div><a class="crumb" href="#/shows">${ico('chevL')}Shows</a></div>
           <div id="show-head" class="${A(first)}">${dynHead()}</div>
           ${showSettingsPanel(d.show, first)}
           <div id="show-body" class="page">${dynBody()}</div>
@@ -898,6 +597,17 @@
       mount(root) {
         touchShow(st.detail.show);
         bindShowSettings(root, st.detail.show, id);
+        // Pick release expander (SPEC-v1.2 4): open rows survive repaints through st.openPicks.
+        $('#show-body', root).addEventListener('click', (e) => {
+          const b = e.target.closest('[data-pick-toggle]');
+          if (!b) return;
+          const n = Number(b.dataset.pickToggle);
+          const row = document.getElementById(b.getAttribute('aria-controls'));
+          const open = b.getAttribute('aria-expanded') !== 'true';
+          if (open) st.openPicks.add(n); else st.openPicks.delete(n);
+          b.setAttribute('aria-expanded', String(open));
+          if (row) { row.hidden = !open; if (open) $('select', row)?.focus(); }
+        });
         // Bound on #show-head (lives only as long as this view) so listeners never pile up on #view.
         $('#show-head', root).addEventListener('change', async (e) => {
           if (e.target.id !== 'list-status') return;
@@ -938,8 +648,8 @@
           await API.setEpisodeAuto(id, n, v);
           toast(v ? `Episode ${n} will download by itself.` : `Episode ${n} will not download by itself. Press Add to get it.`, 'ok');
           await reload();
-          const again = $(`[data-act="ep-auto"][data-ep="${n}"]`);
-          if (again) again.focus();
+          // The toggle lives in the row's ⋯ menu, which is closed after the repaint: focus that menu's button.
+          focusFirst(`#ep-${n} [data-menu]`, `#ep-${n} .btn-watch`);
         },
         'download-missing': async () => {
           const r = await downloadMissingFlow(id);
@@ -958,7 +668,7 @@
           const delFiles = !!(dialog && $('#del-files', dialog) && $('#del-files', dialog).checked);
           await API.deleteShow(id, delFiles);
           toast(`Removed ${showTitle(st.detail.show)}`, 'ok');
-          location.hash = '#/library';
+          location.hash = '#/shows';
         },
       },
       async refresh(root) {
@@ -1007,12 +717,17 @@
     toast(`${done}${skipped ? ` ${plural(skipped, 'episode')} had no release to pick.` : ''}`, added ? 'ok' : 'info', 7000);
     return { preview: p, changed: true };
   }
+  /** SPEC-v1.2 4: banner-tinted glass header, poster 160, title 28, chips, progress with the three counts,
+      action row Play next · Watched through · Download all missing · Open folder · AniList · ⋯ (Refresh, list, Remove). */
   function showHead(d, preview) {
     const s = d.show;
     const missing = preview && preview.count > 0 ? preview.count : 0;
     const alts = [s.title_romaji, s.title_english, s.title_native].filter((t, i, a) => t && t !== showTitle(s) && a.indexOf(t) === i);
     const seasonTxt = s.season && s.season_year ? `${pretty(s.season)} ${s.season_year}` : s.season_year || '';
-    return h`<section class="show-head">
+    const eps = (d.episodes || []).slice().sort((a, b) => a.number - b.number);
+    const nextFile = eps.find((e) => e.file && !e.watched_at);
+    const color = isHex(s.color) ? raw(`style="--c:${s.color}"`) : '';
+    return h`<section class="show-head" ${color}>
       <div class="show-banner" data-bg="${s.banner_url || ''}"></div>
       <div class="show-card glass-hero">
         <img class="show-poster" src="${safeUrl(s.cover_url)}" alt="">
@@ -1023,33 +738,40 @@
             ${s.format ? h`<span class="chip">${FORMAT_LABEL[s.format] || s.format}</span>` : ''}
             ${s.status ? h`<span class="chip">${STATUS_LABEL[s.status] || pretty(s.status)}</span>` : ''}
             ${seasonTxt ? h`<span class="chip">${seasonTxt}</span>` : ''}
-            <span class="chip">${s.episodes_total ? plural(s.episodes_total, 'episode') : 'Episodes: unknown'}</span>
+            <span class="chip">${s.episodes_total ? `${fNum(s.episodes_total)} eps` : 'Episodes: unknown'}</span>
             ${s.duration_min ? h`<span class="chip">${s.duration_min} min</span>` : ''}
-            ${s.next && s.next.aired_at ? h`<span class="chip chip-accent" title="${fFull(s.next.aired_at)}">${ico('clock')}Ep ${s.next.episode} · ${fWhen(s.next.aired_at)}</span>` : ''}
+            ${s.next && s.next.aired_at ? h`<span class="chip chip-accent" title="${fFull(s.next.aired_at)}">${ico('clock')}Next Ep ${s.next.episode} · ${fWhen(s.next.aired_at)}</span>` : ''}
           </div>
           <div class="show-prog">${progBar(s, true)}</div>
-          ${watchedThroughForm(d)}
           <div class="show-actions">
-            <label class="sr-only" for="list-status">List status</label>
-            <select class="select select-sm" id="list-status">${LIST_TABS.filter(([k]) => k !== 'all').map(([k, l]) => h`<option value="${k}" ${s.list_status === k ? raw('selected') : ''}>${l}</option>`)}</select>
-            ${missing ? h`<button class="btn btn-sm" data-act="download-missing" title="${plural(missing, 'aired episode')} without a file or a release">${ico('download')}Download all missing</button>` : ''}
-            <button class="btn btn-sm" data-act="refresh-show">${ico('refresh')}Refresh</button>
-            <button class="btn btn-sm" data-act="open-show-folder" title="Open this show's folder in your file manager">${ico('folder')}Open folder</button>
-            ${s.anilist_id ? h`<a class="btn btn-sm btn-ghost" href="https://anilist.co/anime/${Number(s.anilist_id)}" target="_blank" rel="noopener noreferrer">${ico('external')}AniList</a>` : ''}
-            <button class="btn btn-sm btn-ghost" data-act="remove-show">${ico('trash')}Remove</button>
+            ${nextFile ? h`<button class="btn btn-primary" data-act="play" data-file="${nextFile.file.id}" data-show="${s.id}" data-label="episode ${nextFile.number}" id="play-next">${ico('play')}Play episode ${nextFile.number}</button>` : ''}
+            ${watchedThroughForm(d)}
+            ${missing ? h`<button class="btn" data-act="download-missing" title="${plural(missing, 'aired episode')} without a file or a release">${ico('download')}Download all missing<span class="btn-n">${fNum(missing)}</span></button>` : ''}
+            <button class="btn" data-act="open-show-folder" title="Open this show's folder in your file manager">${ico('folder')}Open folder</button>
+            ${s.anilist_id ? h`<a class="btn btn-ghost" href="https://anilist.co/anime/${Number(s.anilist_id)}" target="_blank" rel="noopener noreferrer">${ico('external')}AniList</a>` : ''}
+            ${menu('show-more', `More actions for ${showTitle(s)}`, h`
+              <button type="button" class="menu-item" data-act="refresh-show">${ico('refresh')}Refresh from AniList</button>
+              <div class="menu-field"><label for="list-status">List</label>
+                <select class="select select-sm" id="list-status">${LIST_TABS.map(([k, l]) => h`<option value="${k}" ${s.list_status === k ? raw('selected') : ''}>${l}</option>`)}</select></div>
+              <button type="button" class="menu-item is-danger" data-act="remove-show">${ico('trash')}Remove show</button>`, 'btn')}
           </div>
         </div>
       </div>
     </section>`;
+  }
+  /** ⋯ popover: a disclosure button + a panel of buttons (app-wide handler in "menus" below). */
+  function menu(id, label, items, btnCls = 'btn btn-sm btn-ghost') {
+    return h`<div class="menu"><button type="button" class="${btnCls} btn-icon menu-btn" data-menu="${id}" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" aria-label="${label}" data-tip="More">${ico('more')}</button>
+      <div class="menu-pop surface" id="${id}" hidden>${items}</div></div>`;
   }
   /** SPEC-v1.1 11 header field, prefilled with the highest watched episode number (empty when none). */
   function watchedThroughForm(d) {
     const hi = (d.episodes || []).reduce((a, e) => (e.watched_at && e.number > a ? e.number : a), 0);
     const total = d.show.episodes_total;
     return h`<form class="wt-form" id="wt-form" novalidate>
-      <label for="wt-n">Watched through episode</label>
-      <input class="input input-sm" id="wt-n" type="number" inputmode="numeric" min="1" ${total ? raw(`max="${Number(total) + 50}"`) : ''} step="1" value="${hi || ''}" aria-describedby="wt-err">
-      <button class="btn btn-sm" type="submit" aria-label="Set: mark episodes 1 to the number watched">Set</button>
+      <label for="wt-n">Watched through</label>
+      <input class="input" id="wt-n" type="number" inputmode="numeric" min="1" ${total ? raw(`max="${Number(total) + 50}"`) : ''} step="1" value="${hi || ''}" aria-describedby="wt-err">
+      <button class="btn" type="submit" aria-label="Set: mark episodes 1 to the number watched">Set</button>
       <span class="err" id="wt-err" role="alert"></span>
     </form>`;
   }
@@ -1067,7 +789,7 @@
     else if (rel) {
       const map = { added: ['chip-warn', 's-dl', 'Downloading'], downloading: ['chip-warn', 's-dl', 'Downloading'], chosen: ['chip-warn', 's-dl', 'Magnet ready'], done: ['chip-ok', 's-disk', 'Downloaded'], failed: ['chip-bad', 's-bad', 'Failed'], skipped: ['', 's-aired', 'Skipped'] };
       const x = map[rel.status];
-      if (x) chips.push(h`<span class="chip ${x[0]}" title="${rel.title || ''}"><span class="dot ${x[1]}"></span>${x[2]}</span>`);
+      if (x) chips.push(h`<span class="chip ${x[0]}" title="${rel.title || ''}${rel.status_note ? ' · ' + rel.status_note : ''}"><span class="dot ${x[1]}"></span>${x[2]}</span>`);
     }
     // SPEC-v1.1 9: aired, no file, no active release, and the server says the auto rule does not apply.
     const activeRel = rel && ['chosen', 'added', 'downloading'].includes(rel.status);
@@ -1083,17 +805,19 @@
     }
     return chips;
   }
-  /** SPEC-v1.1 9 per-episode toggle. "On" = the conveyor would take it by itself: auto 1, or auto unset and no
-      reason from the server. auto 1 below the show's auto_from floor still counts as on (the chip explains). */
-  function autoToggle(e) {
+  /** SPEC-v1.1 9 per-episode auto, now a ⋯ menu item. "On" = the conveyor would take it by itself: auto 1, or auto
+      unset and no reason from the server. auto 1 below the show's auto_from floor still counts as on (the chip explains). */
+  function autoItem(e) {
     const on = e.auto === 1 || (e.auto !== 0 && !e.auto_reason);
     const label = on ? 'Stop auto-downloading' : 'Auto-download this episode';
-    return h`<button class="btn btn-sm btn-ghost btn-icon btn-auto" data-act="ep-auto" data-ep="${e.number}" data-val="${on ? 0 : 1}" title="${label}" aria-label="${label}: episode ${e.number}">${ico(on ? 'boltOff' : 'bolt')}</button>`;
+    return h`<button type="button" class="menu-item btn-auto" data-act="ep-auto" data-ep="${e.number}" data-val="${on ? 0 : 1}" aria-label="${label}: episode ${e.number}">${ico(on ? 'boltOff' : 'bolt')}${label}</button>`;
   }
   function upToHere(n) {
     const label = n === 1 ? 'Mark episode 1 watched' : `Mark episodes 1 to ${n} watched`;
-    return h`<button class="btn btn-sm btn-ghost btn-icon btn-thru" data-act="watch-through" data-ep="${n}" title="${label}" aria-label="${label}">${ico('checkAll')}</button>`;
+    return h`<button class="btn btn-sm btn-ghost btn-icon btn-thru" data-act="watch-through" data-ep="${n}" data-tip="Up to here" aria-label="${label}">${ico('checkAll')}</button>`;
   }
+  const relDesc = (r) => [r.release_group || 'Unknown group', r.resolution, r.version > 1 ? 'v' + r.version : ''].filter(Boolean).join(' ');
+  /** SPEC-v1.2 4: # · Aired · State · Release · Actions. Candidates sit behind "Pick release" (an expansion row). */
   function showBody(d, st) {
     const s = d.show;
     const eps = (d.episodes || []).slice().sort((a, b) => a.number - b.number);
@@ -1111,55 +835,67 @@
     const visible = eps.slice(from, to);
     const later = eps.length - to;
     const dubs = !!(S.settings && S.settings.dubs && S.settings.dubs.enabled);
-    const hasTitles = eps.some((e) => e.title);
-    const cols = hasTitles ? 6 : 5;
+    const COLS = 5;
     const rows = visible.map((e) => {
+      const n = e.number;
       const isNext = eps[nextIdx] === e;
       const cur = e.release ? { ...(relById[e.release.id] || {}), ...e.release } : null;
-      const cands = rels.filter((r) => r.episode === e.number && r.status === 'candidate').sort((a, b) => (b.seeders || 0) - (a.seeders || 0));
+      const cands = rels.filter((r) => r.episode === n && r.status === 'candidate').sort((a, b) => (b.seeders || 0) - (a.seeders || 0));
       const aired = e.aired_at && e.aired_at <= now;
       const magnet = cur && cur.status === 'chosen' ? safeMagnet(cur.magnet) : '';
       const active = !e.file && cur && ['chosen', 'added', 'downloading'].includes(cur.status);
       const f = e.file;
-      const fileCell = f
-        ? h`<span class="ellipsis mono" title="${f.path || f.name}">${f.name || baseName(f.path)}</span><span class="tiny dim">${[f.release_group, f.resolution, f.version > 1 ? 'v' + f.version : '', fSize(f.size)].filter(Boolean).join(' · ')}</span>`
-        : h`${cur && cur.title ? h`<span class="ellipsis" title="${cur.title}">${cur.title}</span><span class="tiny dim">${cur.seeders != null ? fNum(cur.seeders) + ' seeders' : ''}${cur.status_note ? ' · ' + cur.status_note : ''}</span>` : !cands.length ? h`<span class="dim">—</span>` : ''}
-          ${cands.length ? h`<div class="pick"><label class="sr-only" for="pick-${e.number}">Other releases for episode ${e.number}</label><select class="select select-sm" id="pick-${e.number}">${cands.map((r) => h`<option value="${r.id}">${[r.release_group || 'Unknown group', r.resolution, r.version > 1 ? 'v' + r.version : ''].filter(Boolean).join(' ')} · ${fNum(r.seeders ?? 0)} seeders${r.size_bytes ? ' · ' + fSize(r.size_bytes) : ''}</option>`)}</select>
-            <button class="btn btn-sm" data-act="add-release" data-pick="pick-${e.number}" title="Use this release instead">${ico('download')}Add</button>
-            <button class="btn btn-sm btn-ghost btn-icon" data-act="skip-release" data-pick="pick-${e.number}" title="Never pick this release" aria-label="Skip the selected release for episode ${e.number}">${ico('skip')}</button></div>` : ''}`;
-      return h`<tr class="${isNext ? 'is-next' : ''} ${e.watched_at ? 'is-watched' : ''}">
-        <td class="c-n num">${e.number}</td>
-        ${hasTitles ? h`<td class="c-title">${e.title || h`<span class="dim">Episode ${e.number}</span>`}</td>` : ''}
-        <td class="c-aired">${e.aired_at ? h`<span title="${fFull(e.aired_at)}">${fWhen(e.aired_at)}</span>` : h`<span class="dim">Unknown</span>`}${dubs && e.dub_aired_at ? h`<div class="tiny dim" title="${fFull(e.dub_aired_at)}">Dub ${fWhen(e.dub_aired_at)}</div>` : ''}</td>
-        <td class="c-state"><div class="row" style="flex-wrap:wrap;gap:4px">${isNext ? h`<span class="chip chip-accent">Next</span>` : ''}${epState(e, cur)}</div></td>
-        <td class="c-file">${fileCell}</td>
+      const open = st.openPicks.has(n);
+      const relText = f ? (f.name || baseName(f.path)) : cur && cur.title ? cur.title : '';
+      const relTip = f ? [f.path || f.name, [f.release_group, f.resolution, f.version > 1 ? 'v' + f.version : '', fSize(f.size)].filter(Boolean).join(' · ')].join('\n')
+        : cur && cur.title ? [cur.title, cur.seeders != null ? `${fNum(cur.seeders)} seeders` : '', cur.status_note || ''].filter(Boolean).join('\n') : '';
+      const chips = [isNext ? h`<span class="chip chip-accent">Next</span>` : '', ...epState(e, cur)].filter(Boolean).slice(0, 2);
+      const items = [
+        !f && cands.length && !active ? h`<button type="button" class="menu-item" data-act="add-release" data-release="${cands[0].id}">${ico('download')}Add best release <span class="menu-sub">${relDesc(cands[0])} · ${fNum(cands[0].seeders ?? 0)} seeders</span></button>` : '',
+        active ? h`<button type="button" class="menu-item" data-act="skip-release" data-release="${cur.id}" data-show="${s.id}" data-ep="${n}" aria-label="Skip the current release for episode ${n} and stop auto-downloading it">${ico('x')}Skip this release</button>` : '',
+        !f && !active ? autoItem(e) : '',
+        magnet ? h`<a class="menu-item" href="${magnet}" aria-label="Open magnet link for episode ${n}">${ico('magnet')}Open magnet link</a>` : '',
+        f ? h`<button type="button" class="menu-item" data-act="reveal" data-file="${f.id}" aria-label="Show episode ${n} in folder">${ico('folder')}Reveal file</button>` : '',
+      ].filter(Boolean);
+      const row = h`<tr class="ep-row ${isNext ? 'is-next' : ''} ${e.watched_at ? 'is-watched' : ''}" id="ep-${n}">
+        <td class="c-n num">${n}</td>
+        <td class="c-aired">${e.aired_at ? h`<span title="${fFull(e.aired_at)}">${fAired(e.aired_at)}</span>` : h`<span class="dim">Unknown</span>`}${dubs && e.dub_aired_at ? h`<div class="sub dim" title="${fFull(e.dub_aired_at)}">Dub ${fAired(e.dub_aired_at)}</div>` : ''}</td>
+        <td class="c-state"><div class="chips">${chips}</div></td>
+        <td class="c-rel ${relText || cands.length ? '' : 'is-empty'}"><div class="rel-line">${relText ? h`<span class="ellipsis ${f ? 'mono' : ''}" title="${relTip}">${relText}</span>` : h`<span class="dim">—</span>`}
+          ${cands.length ? h`<button type="button" class="btn btn-sm btn-ghost pick-toggle" data-pick-toggle="${n}" aria-expanded="${String(open)}" aria-controls="pick-row-${n}">Pick release<span class="pick-n">${fNum(cands.length)}</span>${ico('chevD')}</button>` : ''}</div></td>
         <td class="c-act"><div class="acts">
-          ${f ? h`<button class="btn btn-sm btn-primary" data-act="play" data-file="${f.id}" data-show="${s.id}" data-label="episode ${e.number}">${ico('play')}Play</button><button class="btn btn-sm btn-icon" data-act="reveal" data-file="${f.id}" title="Show in folder" aria-label="Show episode ${e.number} in folder">${ico('folder')}</button>` : ''}
-          ${magnet ? h`<button class="btn btn-sm" data-act="copy-magnet" data-magnet="${magnet}" title="Copy the magnet link and paste it into your torrent app">${ico('copy')}Magnet</button><a class="btn btn-sm btn-icon" href="${magnet}" title="Open the magnet link in your torrent app" aria-label="Open magnet link for episode ${e.number}">${ico('magnet')}</a>` : ''}
-          ${active ? h`<button class="btn btn-sm btn-ghost btn-icon" data-act="skip-release" data-release="${cur.id}" data-show="${s.id}" data-ep="${e.number}" title="Cancel, skip this release and stop auto-downloading this episode" aria-label="Skip the current release for episode ${e.number} and stop auto-downloading it">${ico('x')}</button>` : ''}
-          ${!f && !active ? autoToggle(e) : ''}
-          ${aired || f || e.watched_at ? h`<span class="acts-pair">${e.number > prefix ? upToHere(e.number) : ''}<button class="btn btn-sm ${e.watched_at ? 'is-on' : ''}" data-act="watched" data-show="${s.id}" data-ep="${e.number}" data-val="${e.watched_at ? 0 : 1}" aria-pressed="${e.watched_at ? 'true' : 'false'}" title="${e.watched_at ? 'Mark unwatched' : 'Mark watched'}">${ico('check')}Watched</button></span>` : ''}
+          ${f ? h`<button class="btn btn-sm ${e.watched_at ? '' : 'btn-primary'}" data-act="play" data-file="${f.id}" data-show="${s.id}" data-label="episode ${n}" aria-label="Play episode ${n}">${ico('play')}Play</button>` : ''}
+          ${magnet ? h`<button class="btn btn-sm" data-act="copy-magnet" data-magnet="${magnet}" data-tip="Copy the magnet link, then paste it into your torrent app" aria-label="Copy the magnet link for episode ${n}">${ico('copy')}Magnet</button>` : ''}
+          ${aired || f || e.watched_at ? h`<span class="acts-pair">${n > prefix ? upToHere(n) : ''}<button class="btn btn-sm btn-icon btn-watch ${e.watched_at ? 'is-on' : ''}" data-act="watched" data-show="${s.id}" data-ep="${n}" data-val="${e.watched_at ? 0 : 1}" aria-pressed="${e.watched_at ? 'true' : 'false'}" data-tip="${e.watched_at ? 'Watched (click to undo)' : 'Mark watched'}" aria-label="Watched: episode ${n}">${ico('check')}</button></span>` : ''}
+          ${items.length ? menu(`ep-more-${n}`, `More for episode ${n}`, items) : h`<span class="menu-gap" aria-hidden="true"></span>`}
         </div></td>
       </tr>`;
+      const pick = cands.length ? h`<tr class="pick-row" id="pick-row-${n}" ${open ? '' : raw('hidden')}><td colspan="${COLS}"><div class="pick">
+          <label for="pick-${n}">Release for episode ${n}</label>
+          <select class="select select-sm" id="pick-${n}">${cands.map((r) => h`<option value="${r.id}">${relDesc(r)} · ${fNum(r.seeders ?? 0)} seeders${r.size_bytes ? ' · ' + fSize(r.size_bytes) : ''}</option>`)}</select>
+          <button class="btn btn-sm btn-primary" data-act="add-release" data-pick="pick-${n}" title="Use this release">${ico('download')}Add</button>
+          <button class="btn btn-sm btn-ghost btn-icon" data-act="skip-release" data-pick="pick-${n}" data-tip="Never pick this release" aria-label="Skip the selected release for episode ${n}">${ico('skip')}</button>
+        </div></td></tr>` : '';
+      return h`${row}${pick}`;
     });
     const files = (d.files || []).slice().sort((a, b) => (b.episode || 0) - (a.episode || 0));
     return h`<section class="surface panel">
       <div class="panel-head"><h2>Episodes<span class="count">${eps.length || ''}</span></h2>${stateLegend()}</div>
       ${eps.length ? h`<table class="ep-table">
-        <thead><tr><th class="c-n">#</th>${hasTitles ? h`<th class="c-title">Title</th>` : ''}<th class="c-aired">Aired</th><th class="c-state">State</th><th class="c-file">File or release</th><th class="c-act"><span class="sr-only">Actions</span></th></tr></thead>
-        <tbody>${from > 0 ? h`<tr class="more-row"><td colspan="${cols}"><button class="btn btn-sm" data-act="show-all">Show ${plural(from, 'earlier episode')}</button></td></tr>` : ''}${rows}${later > 0 ? h`<tr class="more-row"><td colspan="${cols}"><button class="btn btn-sm" data-act="show-all">Show ${plural(later, 'later episode')}</button></td></tr>` : ''}</tbody>
+        <thead><tr><th class="c-n">#</th><th class="c-aired">Aired</th><th class="c-state">State</th><th class="c-rel">Release</th><th class="c-act"><span class="sr-only">Actions</span></th></tr></thead>
+        <tbody>${from > 0 ? h`<tr class="more-row"><td colspan="${COLS}"><button class="btn btn-sm" data-act="show-all">Show ${plural(from, 'earlier episode')}</button></td></tr>` : ''}${rows}${later > 0 ? h`<tr class="more-row"><td colspan="${COLS}"><button class="btn btn-sm" data-act="show-all">Show ${plural(later, 'later episode')}</button></td></tr>` : ''}</tbody>
       </table>` : emptyBox('calendar', 'No episodes yet', 'AniList has no airing schedule for this show yet. Refresh later.', '')}
     </section>
     <div class="two-col">
       <section class="surface panel">
         <div class="panel-head"><h2>Files<span class="count">${files.length || ''}</span></h2></div>
-        ${files.length ? h`<ul class="list-rows">${files.map((f) => h`<li><div class="main"><span class="ellipsis mono" title="${f.path}">${f.name || baseName(f.path)}</span><span class="tiny dim">Ep ${f.episode ?? '?'} · ${[f.release_group, f.resolution, f.version > 1 ? 'v' + f.version : '', fSize(f.size)].filter(Boolean).join(' · ')}${f.present === 0 || f.present === false ? ' · missing' : ''}</span></div>
-          <div class="acts"><button class="btn btn-sm btn-icon" data-act="play" data-file="${f.id}" data-show="${s.id}" data-label="episode ${f.episode}" aria-label="Play episode ${f.episode}" title="Play">${ico('play')}</button><button class="btn btn-sm btn-icon" data-act="reveal" data-file="${f.id}" aria-label="Show in folder" title="Show in folder">${ico('folder')}</button></div></li>`)}</ul>`
+        ${files.length ? h`<ul class="list-rows">${files.map((f) => h`<li><div class="main"><span class="ellipsis mono" title="${f.path}">${f.name || baseName(f.path)}</span><span class="sub dim">Ep ${f.episode ?? '?'} · ${[f.release_group, f.resolution, f.version > 1 ? 'v' + f.version : '', fSize(f.size)].filter(Boolean).join(' · ')}${f.present === 0 || f.present === false ? ' · missing' : ''}</span></div>
+          <div class="acts"><button class="btn btn-sm btn-icon" data-act="play" data-file="${f.id}" data-show="${s.id}" data-label="episode ${f.episode}" aria-label="Play episode ${f.episode}" data-tip="Play">${ico('play')}</button><button class="btn btn-sm btn-icon" data-act="reveal" data-file="${f.id}" aria-label="Show in folder" data-tip="Show in folder">${ico('folder')}</button></div></li>`)}</ul>`
           : h`<p class="muted small">No files matched yet. Files appear when the scanner finds them in one of your library folders.</p>`}
       </section>
       <section class="surface panel">
         <div class="panel-head"><h2>Releases<span class="count">${rels.length || ''}</span></h2></div>
-        ${rels.length ? h`<ul class="list-rows">${rels.slice().sort((a, b) => (b.published_at || 0) - (a.published_at || 0)).slice(0, 30).map((r) => h`<li><div class="main"><span class="ellipsis" title="${r.title}">${r.title}</span><span class="tiny dim">${r.is_batch ? 'Batch' : 'Ep ' + (r.episode ?? '?')} · ${fNum(r.seeders ?? 0)} seeders${r.size_bytes ? ' · ' + fSize(r.size_bytes) : ''} · ${fRel(r.published_at)}${r.status_note ? ' · ' + r.status_note : ''}</span></div>
+        ${rels.length ? h`<ul class="list-rows">${rels.slice().sort((a, b) => (b.published_at || 0) - (a.published_at || 0)).slice(0, 30).map((r) => h`<li><div class="main"><span class="ellipsis" title="${r.title}">${r.title}</span><span class="sub dim">${r.is_batch ? 'Batch' : 'Ep ' + (r.episode ?? '?')} · ${fNum(r.seeders ?? 0)} seeders${r.size_bytes ? ' · ' + fSize(r.size_bytes) : ''} · ${fRel(r.published_at)}${r.status_note ? ' · ' + r.status_note : ''}</span></div>
           <span class="chip ${r.status === 'done' ? 'chip-ok' : ['added', 'downloading', 'chosen'].includes(r.status) ? 'chip-warn' : r.status === 'failed' ? 'chip-bad' : ''}">${pretty(r.status)}</span></li>`)}</ul>`
           : h`<p class="muted small">No nyaa.si results yet. The conveyor searches every ${S.settings && S.settings.conveyor ? S.settings.conveyor.poll_interval_min : 15} minutes while the show is on your Watching list.</p>`}
       </section>
@@ -1242,40 +978,27 @@
   /** opts.embedded: render without the page header (setup guide step 5 reuses this view). */
   Views.add = (m, params, opts = {}) => {
     const now = seasonOf();
-    const st = { season: now.season, year: now.year, q: '', results: null, searching: false, seasonList: null, seasonErr: null, accounts: [] };
+    const st = { season: now.season, year: now.year, q: (params && params.get('q')) || '', results: null, searching: false, seasonList: null, seasonErr: null, accounts: [] };
     const tracked = (mItem) => {
       const aid = mItem.anilist_id ?? mItem.id;
       if (mItem.tracked) return true;
       return Object.values(S.showsById).some((s) => Number(s.anilist_id) === Number(aid));
     };
     const trackedShowId = (aid) => { const s = Object.values(S.showsById).find((x) => Number(x.anilist_id) === Number(aid)); return s ? s.id : null; };
-    const mediaCard = (mItem) => {
-      const aid = mItem.anilist_id ?? mItem.id;
-      const cover = mItem.cover_url || (mItem.coverImage && (mItem.coverImage.extraLarge || mItem.coverImage.large));
-      const eps = mItem.episodes ?? mItem.episodes_total;
-      const meta = [FORMAT_LABEL[mItem.format] || mItem.format, eps ? plural(eps, 'ep') : '', mItem.season && (mItem.season_year || mItem.seasonYear) ? `${pretty(mItem.season)} ${mItem.season_year || mItem.seasonYear}` : ''].filter(Boolean).join(' · ');
-      const isT = tracked(mItem);
-      const sid = trackedShowId(aid);
-      return h`<article class="media-card">
-        <div class="poster-frame"><img src="${safeUrl(cover)}" alt="" loading="lazy"></div>
-        <div class="poster-title clamp2">${mediaTitle(mItem)}</div>
-        <div class="meta">${meta || ' '}</div>
-        ${isT ? (sid ? h`<a class="btn btn-sm is-on" href="#/show/${sid}">${ico('check')}Tracked</a>` : h`<button class="btn btn-sm is-on" disabled>${ico('check')}Tracked</button>`)
-          : h`<button class="btn btn-sm" data-act="track" data-aid="${aid}" data-title="${mediaTitle(mItem)}">${ico('plus')}Track</button>`}
-      </article>`;
-    };
+    // SPEC-v1.2 5: the 3.3 poster card with a Track button in the footer (shows.js).
+    const mediaCard = (mItem) => ABC.Shows.mediaCard(mItem, { tracked: tracked(mItem), showId: trackedShowId(mItem.anilist_id ?? mItem.id) });
     const resultsHtml = () => {
-      if (st.searching) return h`<div class="media-grid">${Array.from({ length: 5 }, () => skel(300))}</div>`;
+      if (st.searching) return h`<div class="pgrid media-grid">${Array.from({ length: 5 }, () => skel(300))}</div>`;
       if (st.results === null) return h`<p class="muted small">Type at least 2 letters. Romaji, English and Japanese titles all work.</p>`;
       if (st.results instanceof Error) return h`<p class="note">Search failed: ${st.results.message}</p>`;
       if (!st.results.length) return emptyBox('search', `Nothing on AniList for "${st.q}"`, 'Check the spelling or try the romaji title.', '');
-      return h`<div class="media-grid">${st.results.map(mediaCard)}</div>`;
+      return h`<div class="pgrid media-grid">${st.results.map(mediaCard)}</div>`;
     };
     const seasonHtml = () => {
       if (st.seasonErr) return h`<p class="note">Season list failed: ${st.seasonErr.message}</p>`;
-      if (st.seasonList === null) return h`<div class="media-grid">${Array.from({ length: 6 }, () => skel(300))}</div>`;
+      if (st.seasonList === null) return h`<div class="pgrid media-grid">${Array.from({ length: 6 }, () => skel(300))}</div>`;
       if (!st.seasonList.length) return emptyBox('calendar', 'No shows listed for this season', 'AniList has nothing for it yet.', '');
-      return h`<div class="media-grid">${st.seasonList.map(mediaCard)}</div>`;
+      return h`<div class="pgrid media-grid">${st.seasonList.map(mediaCard)}</div>`;
     };
     const loadSeason = async (root) => {
       st.seasonList = null; st.seasonErr = null;
@@ -1336,7 +1059,7 @@
         if (S.last) paintFromLast();
         const qIn = $('#add-q', root);
         let seq = 0;
-        qIn.addEventListener('input', debounce(async () => {
+        const runSearch = async () => {
           st.q = qIn.value.trim();
           const my = ++seq;
           if (st.q.length < 2) { st.results = null; st.searching = false; $('#search-results', root).innerHTML = String(resultsHtml()); return; }
@@ -1346,7 +1069,10 @@
           if (my !== seq) return;
           st.searching = false; st.results = r;
           $('#search-results', root).innerHTML = String(resultsHtml());
-        }, 350));
+        };
+        qIn.addEventListener('input', debounce(runSearch, 350));
+        // Global search "Search AniList for ..." lands here as #/add?q=... (SPEC-v1.2 2).
+        if (st.q.length >= 2 && st.results === null) runSearch();
         $('#imp-al', root).addEventListener('submit', async (e) => {
           e.preventDefault();
           const user = e.target.elements.user.value.trim();
@@ -1426,7 +1152,7 @@
               </div>
             </div>
             <div class="agenda">
-              ${days.map((d) => { const k = dayKey(d); const cs = byDay[k] || []; return h`<div class="agenda-day ${k === today ? 'is-today' : ''}"><h3>${F.wd.format(d)} <span class="muted small">${F.md.format(d)}</span></h3>${cs.length ? h`<div class="chips">${cs.map((c) => epChip(c, true))}</div>` : h`<p class="small dim">Nothing airs</p>`}</div>`; })}
+              ${days.map((d) => { const k = dayKey(d); const cs = byDay[k] || []; return h`<div class="agenda-day ${k === today ? 'is-today' : ''}"><h3>${F.wd.format(d)} <span class="muted small">${F.md.format(d)}</span></h3>${cs.length ? h`<div class="chips">${cs.map(weekEntry)}</div>` : h`<p class="small dim">Nothing airs</p>`}</div>`; })}
             </div>`}
           </section>
         </div>`;
@@ -1512,7 +1238,7 @@
     { id: 'ui', title: 'Appearance', desc: 'Theme and motion.', fields: [
       { path: 'ui.theme', label: 'Theme', type: 'theme', span: 2 },
       { path: 'ui.accent', label: 'Accent colour', type: 'color', help: 'Empty = the colour of the show you touched last.' },
-      { path: 'ui.reduced_motion', label: 'Reduce motion', type: 'bool', help: 'Turns off poster tilt and fades. Your system setting is respected either way.' },
+      { path: 'ui.reduced_motion', label: 'Reduce motion', type: 'bool', help: 'Turns off fades, slides and the card lift. Your system setting is respected either way.' },
     ] },
     { id: 'notify', title: 'Notifications', desc: 'Planned for a later version.', fields: [
       { path: 'notify.toast', label: 'Desktop notification when an episode lands (planned)', type: 'bool', span: 2, help: 'No effect in v1.' },
@@ -1823,7 +1549,7 @@
   // ------------------------------------------------------------------ global actions (data-act)
   const ACTIONS = {
     async retry() { rerender(true); },
-    async 'run-conveyor'() { await API.runConveyor(); toast('Conveyor run started. Results land in the feed.', 'ok'); },
+    async 'run-conveyor'() { await API.runConveyor(); toast('Conveyor run started. Results show up under Live.', 'ok'); },
     async 'run-scan'() { await API.runScan(); toast('Folder scan started', 'ok'); },
     async play(btn, ds) {
       await API.openFile(ds.file);
@@ -1858,6 +1584,7 @@
     async 'retry-state'() {
       const st = await API.state();
       S.state = st;
+      paintStatus();
       toast(st.download_dir && st.download_dir.exists ? 'The download folder is back.' : 'Still not reachable.', st.download_dir && st.download_dir.exists ? 'ok' : 'info');
       rerender();
     },
@@ -1905,14 +1632,18 @@
   document.addEventListener('error', (e) => { const t = e.target; if (t && t.tagName === 'IMG') t.style.visibility = 'hidden'; }, true);
 
   // ------------------------------------------------------------------ router
+  // Entries are a view name (resolved from Views at route time, so home.js / shows.js can register late) or a
+  // factory function (setup.js pushes one). SPEC-v1.2 2: #/library stays as an alias of #/shows.
   const ROUTES = [
-    [/^\/?$/, Views.dashboard],
-    [/^\/library$/, Views.library],
-    [/^\/add$/, Views.add],
-    [/^\/calendar$/, Views.calendar],
-    [/^\/settings$/, Views.settings],
-    [/^\/show\/(\d+)$/, Views.show],
+    [/^\/?$/, 'home'],
+    [/^\/shows$/, 'shows'],
+    [/^\/library$/, 'shows'],
+    [/^\/add$/, 'add'],
+    [/^\/calendar$/, 'calendar'],
+    [/^\/settings$/, 'settings'],
+    [/^\/show\/(\d+)$/, 'show'],
   ];
+  const factoryOf = (f) => (typeof f === 'string' ? Views[f] : f);
   let current = null;
   let routeSeq = 0;
   function parseHash() {
@@ -1927,13 +1658,13 @@
     }
   }
   function skeleton(name) {
-    if (name === 'dashboard') return h`<div class="dash"><div class="page-head glass" style="grid-area:head"><h1>Home</h1></div>${raw('<div style="grid-area:hero">')}${skel(380, 'border-radius:26px')}${raw('</div><div style="grid-area:stats" class="stats">')}${skel(104)}${skel(104)}${skel(104)}${skel(104)}${raw('</div><div style="grid-area:feed">')}${skel(500)}${raw('</div>')}</div>`;
+    if (name === 'home') return h`<div class="page home">${skel(360, 'border-radius:22px')}${skel(420, 'border-radius:22px')}</div>`;
     return h`<div class="page"><div class="page-head glass"><h1>${cap(name)}</h1></div>${skel(320, 'border-radius:18px')}</div>`;
   }
   async function route(opts = {}) {
     const { path, params } = parseHash();
     let factory = null; let match = null;
-    for (const [re, f] of ROUTES) { const m = path.match(re); if (m) { factory = f; match = m; break; } }
+    for (const [re, f] of ROUTES) { const m = path.match(re); if (m) { factory = factoryOf(f); match = m; break; } }
     if (!factory) { location.replace('#/'); return; }
     // Same view, only ?section= changed on settings: just scroll.
     if (current && current.nav === 'settings' && factory === Views.settings && !opts.force) {
@@ -1942,12 +1673,13 @@
     }
     const seq = ++routeSeq;
     if (current && current.leave) current.leave();
+    closeMenus();
     const view = factory(match, params);
     current = view;
     setNav(view.nav);
     document.title = `${view.title} · ABC`;
     const root = $('#view');
-    root.innerHTML = String(skeleton(view.nav === 'dashboard' ? 'dashboard' : view.title));
+    root.innerHTML = String(skeleton(view.nav === 'home' ? 'home' : view.title));
     window.scrollTo(0, 0);
     await paint(view, seq, true);
     if (opts.focus) root.focus({ preventScroll: true });
@@ -1979,7 +1711,7 @@
     window.scrollTo(0, y);
   }
   let refreshTimer = null; let refreshPending = false;
-  /** Debounced refresh; postponed while the user is typing in a field of the current view. */
+  /** Debounced refresh; postponed while the user is typing in a field of the current view or has a menu open. */
   function scheduleRefresh(ms = 600) {
     if (!current || current.noRefresh) return;
     clearTimeout(refreshTimer);
@@ -1990,14 +1722,164 @@
         if (!refreshPending) { refreshPending = true; a.addEventListener('blur', () => { refreshPending = false; scheduleRefresh(100); }, { once: true }); }
         return;
       }
+      if ($('.menu-pop:not([hidden])', $('#view'))) { scheduleRefresh(1500); return; }
       rerender();
     }, ms);
   }
   function setNav(name) {
-    for (const a of $$('#rail-nav a')) {
+    for (const a of $$('#main-nav a')) {
       if (a.dataset.route === name) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     }
   }
+
+  // ------------------------------------------------------------------ top bar: download status dot, global search
+  /** SPEC-v1.2 2: the download-mode / qBittorrent status dot (same wording the old stat tile had). */
+  function downloaderStatus(st) {
+    const qb = (st && st.qbit) || {};
+    const dl = st && st.downloader;
+    const DL = {
+      qbittorrent: ['qBittorrent', dl && dl.ok ? ['s-disk', 'Connected', 'Downloads go to qBittorrent'] : ['s-bad', 'Not connected', 'Magnet links only until it is back']],
+      magnet: ['Torrent app', dl && dl.ok ? ['s-disk', 'Magnet links', 'Sent to your torrent app'] : ['s-bad', 'No magnet app', (dl && dl.error) || 'No app opens magnet links']],
+      torrent_file: ['Watch folder', dl && dl.ok ? ['s-disk', 'Ready', '.torrent files go to the watch folder'] : ['s-bad', 'Folder missing', (dl && dl.error) || 'The watch folder is not reachable']],
+      manual: ['Downloads', ['s-aired', 'By hand', 'You add magnet links yourself']],
+    };
+    const t = dl && DL[dl.mode];
+    if (t) return { name: t[0], cls: t[1][0], state: t[1][1], sub: t[1][2], section: 'downloads' };
+    const s = qb.connected ? ['s-disk', 'Connected', 'Downloads go to qBittorrent'] : qb.enabled ? ['s-bad', 'Not connected', 'Magnet links only until it is back'] : ['s-aired', 'Off', 'Magnet links only'];
+    return { name: 'qBittorrent', cls: s[0], state: s[1], sub: s[2], section: 'qbit' };
+  }
+  function paintStatus() {
+    const el = $('#dl-status');
+    if (!el || !S.state) return;
+    const d = downloaderStatus(S.state);
+    const text = `${d.name}: ${d.state}. ${d.sub}.`;
+    el.href = `#/settings?section=${d.section}`;
+    el.setAttribute('aria-label', `${text} Open download settings.`);
+    el.dataset.tip = `${d.name}: ${d.state}`;
+    el.innerHTML = String(h`<span class="dot ${d.cls}" aria-hidden="true"></span><span class="tb-status-l">${d.name}</span>`);
+  }
+  function initSearch() {
+    const input = $('#gsearch'); const list = $('#gsearch-list'); const bar = $('.topbar');
+    if (!input || !list) return;
+    let items = []; let active = -1;
+    const close = () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); active = -1; };
+    const setActive = (i) => {
+      active = i;
+      $$('.gs-item', list).forEach((li, j) => li.setAttribute('aria-selected', String(j === i)));
+      if (i >= 0) { input.setAttribute('aria-activedescendant', `gs-${i}`); $(`#gs-${i}`)?.scrollIntoView({ block: 'nearest' }); } else input.removeAttribute('aria-activedescendant');
+    };
+    const paint = () => {
+      const q = input.value.trim();
+      if (!q) { close(); return; }
+      const low = q.toLowerCase();
+      const LS = Object.fromEntries(LIST_TABS);
+      const shows = Object.values(S.showsById)
+        .filter((s) => [s.title, s.title_romaji, s.title_english].some((t) => t && t.toLowerCase().includes(low)))
+        .sort((a, b) => (a.list_status === 'watching' ? 0 : 1) - (b.list_status === 'watching' ? 0 : 1) || showTitle(a).localeCompare(showTitle(b)))
+        .slice(0, 6);
+      items = [...shows.map((s) => ({ href: `#/show/${s.id}`, s })), { href: `#/add?q=${encodeURIComponent(q)}`, q }];
+      list.innerHTML = String(h`${shows.length ? h`<li class="gs-head" role="presentation">Your shows</li>` : ''}${items.map((it, i) => (it.s
+        ? h`<li class="gs-item" role="option" id="gs-${i}" aria-selected="false" data-i="${i}"><img src="${safeUrl(it.s.cover_url)}" alt=""><span class="gs-t">${showTitle(it.s)}</span><span class="gs-sub">${LS[it.s.list_status] || pretty(it.s.list_status)} · ${fNum(progressOf(it.s).watched)} / ${fNum(progressOf(it.s).aired)}</span></li>`
+        : h`<li class="gs-item gs-anilist" role="option" id="gs-${i}" aria-selected="false" data-i="${i}">${ico('search')}<span class="gs-t">Search AniList for "${it.q}"</span><span class="gs-sub">Add page</span></li>`))}`);
+      list.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      setActive(0);
+    };
+    const go = (i) => {
+      const it = items[i];
+      if (!it) return;
+      close();
+      input.value = '';
+      input.blur();
+      bar.classList.remove('is-searching');
+      location.hash = it.href;
+    };
+    input.addEventListener('input', paint);
+    input.addEventListener('focus', () => { if (input.value.trim()) paint(); });
+    input.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== input) { close(); if (!input.value) bar.classList.remove('is-searching'); } }, 120));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (list.hidden) { paint(); return; }
+        const n = items.length;
+        setActive(((active + (e.key === 'ArrowDown' ? 1 : -1)) % n + n) % n);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (list.hidden) paint();
+        go(active >= 0 ? active : 0);
+      } else if (e.key === 'Escape') {
+        e.stopPropagation();
+        if (!list.hidden) close(); else { input.value = ''; input.blur(); bar.classList.remove('is-searching'); }
+      }
+    });
+    list.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the input
+    list.addEventListener('click', (e) => { const li = e.target.closest('.gs-item'); if (li) go(Number(li.dataset.i)); });
+    $('#search-toggle')?.addEventListener('click', () => { bar.classList.add('is-searching'); input.focus(); });
+  }
+  /** `/` focuses search (SPEC-v1.2 2) unless the user is typing somewhere. */
+  function focusSearch() {
+    const input = $('#gsearch');
+    if (!input) return;
+    $('.topbar').classList.add('is-searching');
+    input.focus();
+    input.select();
+  }
+
+  // ------------------------------------------------------------------ menus (⋯ popovers) + global keys
+  function closeMenus(except) {
+    for (const b of $$('[data-menu][aria-expanded="true"]')) {
+      if (b === except) continue;
+      b.setAttribute('aria-expanded', 'false');
+      const p = document.getElementById(b.getAttribute('aria-controls'));
+      if (p) p.hidden = true;
+    }
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-menu]');
+    if (b) {
+      const open = b.getAttribute('aria-expanded') !== 'true';
+      closeMenus(b);
+      b.setAttribute('aria-expanded', String(open));
+      const p = document.getElementById(b.getAttribute('aria-controls'));
+      if (p) {
+        p.hidden = !open;
+        if (open) {
+          // Open upward when there is no room below.
+          p.classList.remove('is-up');
+          const r = p.getBoundingClientRect();
+          if (r.bottom > innerHeight - 8 && r.height < b.getBoundingClientRect().top - 70) p.classList.add('is-up');
+          $('.menu-item, select', p)?.focus();
+        }
+      }
+      return;
+    }
+    const pop = e.target.closest('.menu-pop');
+    if (!pop) { closeMenus(); return; }
+    if (e.target.closest('.menu-item')) setTimeout(() => closeMenus(), 0);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const openMenu = $('[data-menu][aria-expanded="true"]');
+      if (openMenu) { closeMenus(); openMenu.focus(); return; }
+      if (document.querySelector('dialog[open]')) return; // native dialogs close themselves
+      if (ABC.Drawer && ABC.Drawer.isOpen() && !ABC.Drawer.isPinned()) { ABC.Drawer.close(); return; }
+      return;
+    }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.target.closest && e.target.closest('.menu-pop')) {
+      const pop = e.target.closest('.menu-pop');
+      const els = $$('.menu-item, select', pop);
+      const i = els.indexOf(e.target);
+      if (i >= 0 && e.target.tagName !== 'SELECT') { e.preventDefault(); els[(i + (e.key === 'ArrowDown' ? 1 : -1) + els.length) % els.length].focus(); }
+      return;
+    }
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const t = e.target;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (document.querySelector('dialog[open]')) return;
+      e.preventDefault();
+      focusSearch();
+    }
+  });
 
   // ------------------------------------------------------------------ live events (SSE)
   const EVENT_KINDS = ['show.added', 'show.removed', 'airing.updated', 'release.found', 'release.added', 'release.waiting', 'release.skipped', 'download.done', 'download.failed', 'file.found', 'file.missing', 'episode.watched', 'episode.unwatched', 'push.ok', 'push.failed', 'scan.done', 'error'];
@@ -2005,16 +1887,7 @@
   const liveLabel = () => ({ live: 'Live', connecting: 'Connecting…', down: 'Offline' }[liveState]);
   function setLive(s) {
     liveState = s;
-    const dot = $('#live-dot');
-    if (dot) {
-      dot.classList.toggle('is-live', s === 'live');
-      dot.classList.toggle('is-down', s === 'down');
-      const t = `Live updates: ${liveLabel().toLowerCase()}`;
-      dot.title = t;
-      $('#live-text').textContent = t;
-    }
-    const chip = $('#feed-live');
-    if (chip) chip.textContent = liveLabel();
+    if (ABC.Drawer) ABC.Drawer.setLive(s);
   }
   function mergeEvents(list) {
     if (!Array.isArray(list)) return;
@@ -2036,15 +1909,13 @@
     if (ev.id == null) ev.id = (S.lastEventId || 0) + 0.001; // tolerate id-less events
     if (S.eventIds.has(ev.id)) return;
     mergeEvents([ev]);
-    const list = $('#feed-list');
-    if (list) {
-      $('#feed-list-empty')?.remove();
-      list.insertAdjacentHTML('afterbegin', String(feedItem(ev, true)));
-      while (list.children.length > 60) list.lastElementChild.remove();
-    }
+    if (ABC.Drawer) ABC.Drawer.onEvent(ev);
     if (ev.kind === 'error' || ev.kind === 'download.failed' || ev.kind === 'push.failed') toast(ev.message || ev.kind, 'bad');
+    if (ev.kind === 'show.added' || ev.kind === 'show.removed') refreshShowIndex();
     if (current && current.refreshOn && current.refreshOn(ev)) scheduleRefresh();
   }
+  /** Keep S.showsById (global search, drawer show names) current on pages that do not load /api/shows. */
+  const refreshShowIndex = debounce(async () => { const r = await soft(API.shows(), null); if (r.v) indexShows(r.v); }, 800);
   function connectSSE() {
     if (typeof EventSource === 'undefined') { setLive('down'); return; }
     let es;
@@ -2073,29 +1944,40 @@
     }
     for (const el of $$('[data-icon]')) el.innerHTML = svg(el.dataset.icon);
     paintFromLast();
-    const [st0] = await Promise.all([soft(API.state(), null), API.settings().then((s) => { S.settings = s; }, () => { /* the view shows the error */ })]);
+    // Shows feed the global search and the drawer's show names; events fill the drawer before SSE starts.
+    const [st0, shows0, ev0] = await Promise.all([soft(API.state(), null), soft(API.shows(), null), soft(API.events(undefined, 60), []),
+      API.settings().then((s) => { S.settings = s; }, () => { /* the view shows the error */ })]);
     if (st0.v) S.state = st0.v;
+    if (shows0.v) indexShows(shows0.v);
+    mergeEvents(ev0.v);
+    paintStatus();
+    if (ABC.Drawer) ABC.Drawer.init();
+    initSearch();
     // SPEC-v1.1 6.1: first boot opens the setup guide, but only from Home; deep links still work.
     if (st0.v && st0.v.setup_done === false && /^#?\/?$/.test(location.hash)) history.replaceState(null, '', '#/setup');
     applyUiSettings();
     matchMedia('(prefers-reduced-motion: reduce)').addEventListener?.('change', () => applyUiSettings());
     let navByClick = false;
-    $('#rail-nav').addEventListener('click', () => { navByClick = true; });
+    $('#main-nav').addEventListener('click', () => { navByClick = true; });
     window.addEventListener('hashchange', () => { route({ focus: navByClick }); navByClick = false; });
     await route();
     connectSSE();
-    // Relative times ("5 min ago") drift; repaint the feed timestamps every minute.
+    // Relative times ("5 min ago") drift; repaint the drawer timestamps every minute.
     setInterval(() => { for (const t of $$('.feed-meta time')) { const ts = Date.parse(t.getAttribute('datetime')) / 1000; t.textContent = fRel(ts); } }, 60000);
   }
 
-  // ------------------------------------------------------------------ extensions (folders.js, setup.js)
+  // ------------------------------------------------------------------ extensions (folders.js, setup.js, shows.js, home.js, drawer.js)
   // Those files load before app.js and push a function onto window.ABC_EXT; each gets these internals
-  // and may add Views, ROUTES, ACTIONS, or set ABC.Folders / ABC.Setup.
+  // and may add Views, ROUTES, ACTIONS, or set ABC.Folders / ABC.Setup / ABC.Shows / ABC.Drawer.
   const ABC = {
     $, $$, h, raw, esc, ico, svg, cap, plural, clamp, debounce, baseName, fSize, fNum, clone, getPath, setPath, store,
     api, API, ApiError, soft, toast, confirmBox, copyText, S, Views, ROUTES, ACTIONS, rerender, route, hydrate, scheduleRefresh,
     A, OS_WIN, winOr, motionOK, emptyBox, errorPanel, isAbsPath, samePath, toFolders, downloadDirOf,
     SETTINGS_SCHEMA, FIELDS, fieldHtml, readField, fid, isUrl, applyUiSettings, paintFromLast,
+    // v1.2 (home.js, shows.js, drawer.js)
+    showTitle, mediaTitle, progressOf, progBar, fWhen, fRel, fTime, fFull, fAired, F, safeUrl, isHex, readableAccent, nowSec,
+    STATUS_LABEL, FORMAT_LABEL, pretty, LIST_TABS, indexShows, touchShow, weekStart, weekDays, dayKey, toDate, calChips, calState, weekEntry,
+    needsSetup, setupTodo, lowDisk, driveOf, GIB, liveLabel, paintStatus, focusFirst, downloadMissingFlow,
     current: () => current,
   };
   for (const ext of window.ABC_EXT || []) { try { ext(ABC); } catch (err) { console.error('[ABC] extension failed', err); } }
