@@ -82,6 +82,7 @@ type EpisodeRow struct {
 	Release       *ReleaseRef `json:"release"`
 	Auto          *int        `json:"auto"`        // null = follow the rule, 0 = never, 1 = always auto-download
 	AutoReason    string      `json:"auto_reason"` // why the conveyor leaves it alone; "" = it does not (SPEC v1.1 section 9)
+	WaitReason    string      `json:"wait_reason"` // the conveyor's last "waiting ..." reason for this episode (low disk, group not out yet); "" = none
 }
 
 type FileRef struct {
@@ -309,7 +310,11 @@ func (s *Server) showRows(ctx context.Context, c settings.Settings, sh store.Sho
 	rows := make([]EpisodeRow, 0, len(eps))
 	now := s.now().Unix()
 	for _, e := range eps {
-		rows = append(rows, episodeRow(c, ac, sh, e, best, rels, now))
+		row := episodeRow(c, ac, sh, e, best, rels, now)
+		if s.sch != nil {
+			row.WaitReason = s.sch.WaitReason(sh.ID, e.Number)
+		}
+		rows = append(rows, row)
 	}
 	return rows, files, rels, nil
 }

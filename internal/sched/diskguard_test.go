@@ -213,3 +213,63 @@ func (f *fakeQbit) count() int {
 	defer f.mu.Unlock()
 	return len(f.added)
 }
+
+// The guard budgets one pass: releases handed off earlier in the pass and
+// downloads still running count against the free space, a smaller release can
+// still fit after a bigger one waited, and qBittorrent progress shrinks what a
+// running download reserves.
+func TestFreeSpaceBudget(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	q, url := newFakeQbit(t)
+	e.update(t, func(c *settings.Settings) { c.Downloader.Mode = settings.ModeQbit; c.Qbit.URL = url })
+	disk := &fakeDisk{free: 6 << 30} // 6 GiB free, keeps 5 GiB (default); the fake never drops
+	e.s.diskFree = disk.read
+	sh := e.show(t, store.Show{TitleRomaji: "Frieren", Status: "RELEASING"})
+	at := e.clock.Add(-time.Hour).Unix()
+	for n := 1; n <= 4; n++ {
+		e.db.UpsertEpisodeAiring(ctx, sh.ID, n, &at)
+	}
+	item := func(id int64, ep string, size int64) NyaaItem {
+		return NyaaItem{ID: id, Title: "[SubsPlease] Frieren - " + ep + " (1080p).mkv", InfoHash: hashOf(int(id)), Seeders: 9, PublishedAt: e.clock, SizeBytes: size}
+	}
+	big, small := int64(600<<20), int64(100<<20)
+	e.brain.nyaa = []NyaaItem{item(1, "01", big), item(2, "02", big), item(3, "03", big), item(4, "04", small)}
+
+	// Pass 1: ep 1 fits (5.4 left), ep 2 and 3 would go under 5 GiB with ep 1 counted, ep 4 is small enough.
+	e.s.conveyorRun(ctx, 0)
+	st := statusByEp(t, e, sh.ID)
+	if st[1] != store.RelAdded || st[2] != store.RelCandidate || st[3] != store.RelCandidate || st[4] != store.RelAdded || q.count() != 2 {
+		t.Fatalf("pass 1: %v, adds %d; want ep 1 and 4 added", st, q.count())
+	}
+	if w := waitingEvents(t, e, "Frieren ep 2: waiting, only 6.0 GiB free on "); len(w) != 1 || !strings.Contains(w[0].Message, " and 0.6 GiB of downloads still running (keeps 5 GiB free)") {
+		t.Fatalf("ep 2 waiting event: %+v", w)
+	}
+	if r := e.s.WaitReason(sh.ID, 2); !strings.HasPrefix(r, "waiting, only 6.0 GiB free") {
+		t.Fatalf("WaitReason ep 2 = %q", r)
+	}
+	if r := e.s.WaitReason(sh.ID, 1); r != "" {
+		t.Fatalf("WaitReason ep 1 = %q, want none (added)", r)
+	}
+
+	// Pass 2: the two running downloads (no progress known yet) still reserve 0.7 GiB.
+	e.s.conveyorRun(ctx, 0)
+	if st := statusByEp(t, e, sh.ID); st[2] != store.RelCandidate || q.count() != 2 {
+		t.Fatalf("pass 2: ep 2 = %q, adds %d; running downloads not counted", st[2], q.count())
+	}
+
+	// qBittorrent reports both nearly done: ep 2 fits now, ep 3 waits behind it.
+	e.s.setProgress(hashOf(1), 0.95)
+	e.s.setProgress(hashOf(4), 1)
+	e.s.conveyorRun(ctx, 0)
+	st = statusByEp(t, e, sh.ID)
+	if st[2] != store.RelAdded || st[3] != store.RelCandidate || q.count() != 3 {
+		t.Fatalf("pass 3: %v, adds %d; want ep 2 added, ep 3 waiting", st, q.count())
+	}
+	if r := e.s.WaitReason(sh.ID, 2); r != "" {
+		t.Fatalf("WaitReason ep 2 after add = %q", r)
+	}
+	if r := e.s.WaitReason(sh.ID, 3); !strings.Contains(r, "downloads still running") {
+		t.Fatalf("WaitReason ep 3 = %q", r)
+	}
+}

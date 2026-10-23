@@ -813,6 +813,11 @@
     for (const e of eps) { if (e.number !== n + 1 || !e.watched_at) break; n = e.number; }
     return n;
   }
+  /** Short chip text for a server "waiting ..." reason; the full sentence sits in the chip's title. */
+  function waitLabel(r) {
+    if (/GiB free on/.test(r)) return 'low disk';
+    return r.replace(/^waiting[,:]?\s*(for\s+)?/i, '').replace(/\s*\(.*$/, '') || 'later';
+  }
   function epState(e, rel) {
     const chips = [];
     const now = nowSec();
@@ -830,6 +835,9 @@
       const days = (S.settings && S.settings.conveyor && S.settings.conveyor.lookback_days) || 14;
       chips.push(h`<span class="chip chip-dim chip-noauto" title="ABC downloads by itself only episodes that aired in the last ${days} days. Press Add to get this one.">Not auto · ${e.auto_reason}</span>`);
     }
+    // The conveyor found a release but is holding it: low disk, or waiting for the preferred group / resolution.
+    const waiting = !e.file && !activeRel && !notAuto && e.aired_at && e.aired_at <= now && e.wait_reason;
+    if (waiting) chips.push(h`<span class="chip chip-dim" title="${e.wait_reason}"><span class="dot s-aired"></span>Waiting · ${waitLabel(e.wait_reason)}</span>`);
     if (!e.file && !chips.length) {
       if (e.aired_at && e.aired_at > now) chips.push(h`<span class="chip"><span class="dot s-future"></span>Airs ${fRel(e.aired_at)}</span>`);
       else if (e.aired_at) chips.push(h`<span class="chip"><span class="dot s-aired"></span>Not found yet</span>`);

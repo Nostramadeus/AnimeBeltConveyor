@@ -61,8 +61,12 @@ type Sched struct {
 	addMu  sync.Mutex // serialises release adds
 	bulkMu sync.Mutex // serialises Download all missing (SPEC v1.1 section 9)
 
-	noteMu sync.Mutex
-	noted  map[string]string // "show:ep" -> last waiting/skipped reason logged
+	noteMu  sync.Mutex
+	noted   map[string]string // "show:ep" -> last waiting/skipped reason logged
+	waiting map[string]string // "show:ep" -> current "waiting ..." reason, shown by the UI; cleared when the episode moves on
+
+	progMu sync.Mutex
+	prog   map[string]float64 // qBittorrent hash -> last progress seen (0..1), for the free-space budget
 
 	acc   *accumulator
 	opens *openTracker
@@ -87,6 +91,8 @@ func New(st *store.DB, set *settings.Manager, ev *events.Logger, brain Brain) *S
 		airingIval: 6 * time.Hour,
 		diskFree:   diskfree.Free,
 		noted:      map[string]string{},
+		waiting:    map[string]string{},
+		prog:       map[string]float64{},
 		acc:        newAccumulator(),
 		opens:      newOpenTracker(),
 
@@ -435,6 +441,11 @@ func (s *Sched) noteOnceKey(kind string, show store.Show, ep int, key, reason st
 	s.noteMu.Lock()
 	same := s.noted[k] == kind+key
 	s.noted[k] = kind + key
+	if kind == events.ReleaseWaiting {
+		s.waiting[k] = reason
+	} else {
+		delete(s.waiting, k)
+	}
 	s.noteMu.Unlock()
 	if !same {
 		s.ev.Log(kind, show.ID, ep, title(show)+" "+epLabel(ep)+": "+reason, data)
@@ -444,7 +455,40 @@ func (s *Sched) noteOnceKey(kind string, show store.Show, ep int, key, reason st
 func (s *Sched) clearNote(showID int64, ep int) {
 	s.noteMu.Lock()
 	delete(s.noted, itoa64(showID)+":"+itoa(ep))
+	delete(s.waiting, itoa64(showID)+":"+itoa(ep))
 	s.noteMu.Unlock()
+}
+
+// WaitReason is the "waiting ..." reason the conveyor last gave for an episode
+// it could not hand off yet (low disk, preferred group not out yet), "" when
+// none. The UI shows it in the episode's state chip.
+func (s *Sched) WaitReason(showID int64, ep int) string {
+	s.noteMu.Lock()
+	defer s.noteMu.Unlock()
+	return s.waiting[itoa64(showID)+":"+itoa(ep)]
+}
+
+// setProgress / dropProgress keep the last qBittorrent progress per hash, so
+// the free-space budget counts only the bytes a running download still needs.
+func (s *Sched) setProgress(hash string, p float64) {
+	if hash == "" {
+		return
+	}
+	s.progMu.Lock()
+	s.prog[hash] = min(max(p, 0), 1)
+	s.progMu.Unlock()
+}
+
+func (s *Sched) dropProgress(hash string) {
+	s.progMu.Lock()
+	delete(s.prog, hash)
+	s.progMu.Unlock()
+}
+
+func (s *Sched) progressOf(hash string) float64 {
+	s.progMu.Lock()
+	defer s.progMu.Unlock()
+	return s.prog[hash]
 }
 
 // WaitIdle blocks until every queued or running pass has finished. Only valid when

@@ -431,6 +431,7 @@ func (s *Sched) qbitRun(ctx context.Context) error {
 		p, state, content, err := qb.Status(ctx, r.QbitHash)
 		ep := deref(r.Episode)
 		if errors.Is(err, qbit.ErrNotFound) {
+			s.dropProgress(r.QbitHash)
 			sh, _ := s.st.GetShow(ctx, r.ShowID)
 			// SPEC v1.1 section 9: the user removed it, so the episode stops auto-downloading.
 			// SPEC v1.3 section 2.1: that is a skip, not a failure.
@@ -445,8 +446,10 @@ func (s *Sched) qbitRun(ctx context.Context) error {
 			return err
 		}
 		s.setQbitState(true, nil)
+		s.setProgress(r.QbitHash, p)
 		switch {
 		case p >= 1:
+			s.dropProgress(r.QbitHash)
 			sh, _ := s.st.GetShow(ctx, r.ShowID)
 			s.st.SetReleaseStatus(ctx, r.ID, store.RelDone, r.StatusNote)
 			s.ev.Log(events.DownloadDone, r.ShowID, ep, title(sh)+" "+epLabel(ep)+": download finished", map[string]any{"release_id": r.ID, "path": content})
@@ -460,6 +463,7 @@ func (s *Sched) qbitRun(ctx context.Context) error {
 				s.fileMu.Unlock()
 			}
 		case qbit.FailedState(state):
+			s.dropProgress(r.QbitHash)
 			sh, _ := s.st.GetShow(ctx, r.ShowID)
 			s.st.SetReleaseStatus(ctx, r.ID, store.RelFailed, "qBittorrent state "+state)
 			s.ev.Log(events.DownloadFailed, r.ShowID, ep, title(sh)+" "+epLabel(ep)+": qBittorrent reports "+state, map[string]any{"release_id": r.ID})

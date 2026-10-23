@@ -32,6 +32,7 @@ func (s *Sched) conveyorRun(ctx context.Context, only int64) error {
 	}
 	var errs []error
 	fetched := 0
+	budget := s.newBudget(ctx, c)
 	for _, sh := range shows {
 		if only != 0 && sh.ID != only {
 			continue
@@ -52,7 +53,7 @@ func (s *Sched) conveyorRun(ctx context.Context, only int64) error {
 		for id, n := range newByShow {
 			s.ev.Log(events.ReleaseFound, id, 0, fmt.Sprintf("%d new release(s) for %s", n, title(byID[id])), map[string]any{"count": n})
 		}
-		if err := s.pickForShow(ctx, c, sh); err != nil {
+		if err := s.pickForShow(ctx, c, sh, budget); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", title(sh), err))
 		}
 	}
@@ -177,7 +178,7 @@ func candidateOf(r store.Release) Candidate {
 // active release (or, with AutoReplaceV2, a file with a lower version). An
 // episode without a file is handled only when autoAllowed (SPEC v1.1 section 9);
 // the others get no events and their chosen releases are not re-sent.
-func (s *Sched) pickForShow(ctx context.Context, c settings.Settings, sh store.Show) error {
+func (s *Sched) pickForShow(ctx context.Context, c settings.Settings, sh store.Show, budget *diskBudget) error {
 	eps, err := s.st.ListEpisodes(ctx, sh.ID)
 	if err != nil {
 		return err
@@ -241,7 +242,7 @@ func (s *Sched) pickForShow(ctx context.Context, c settings.Settings, sh store.S
 			}
 		}
 		if chosen != nil {
-			if c.Downloader.Mode != settings.ModeManual && file == nil && s.roomFor(c, sh, e.Number, *chosen) {
+			if c.Downloader.Mode != settings.ModeManual && file == nil && s.roomFor(c, sh, e.Number, *chosen, budget) {
 				s.addRelease(ctx, c, sh, *chosen, nil)
 			}
 			continue
@@ -272,7 +273,7 @@ func (s *Sched) pickForShow(ctx context.Context, c settings.Settings, sh store.S
 		if file != nil && rel.Version <= file.Version {
 			continue // brain picked something not better than the file on disk
 		}
-		if !s.roomFor(c, sh, e.Number, *rel) {
+		if !s.roomFor(c, sh, e.Number, *rel, budget) {
 			continue // stays a candidate; picked again when there is room
 		}
 		updated, _ := s.addRelease(ctx, c, sh, *rel, file)
@@ -286,24 +287,80 @@ func (s *Sched) pickForShow(ctx context.Context, c settings.Settings, sh store.S
 // logged again every pass while the free GiB figure in its text changes.
 const lowDiskKey = "low disk space"
 
+// diskBudget is the free-space ledger of one conveyor pass: per volume, the
+// bytes that downloads already in flight still need, plus the full size of
+// every release this pass has handed off. The guard subtracts it from the
+// free figure the OS reports, so a pass with 3 GiB free cannot start ten
+// 700 MiB episodes that then all stall at a fraction. A smaller release later
+// in the pass can still fit when a bigger one did not.
+type diskBudget struct {
+	reserved map[string]int64 // volume -> bytes spoken for
+}
+
+// downloadDirFor is the folder the guard reads for a show: qBittorrent mode =
+// the show's save path (the download folder unless the show has an absolute
+// folder), magnet / torrent_file = DownloadDir(); "" = nothing is downloaded.
+func downloadDirFor(c settings.Settings, sh store.Show) string {
+	switch c.Downloader.Mode {
+	case settings.ModeQbit:
+		return SavePath(c, sh)
+	case settings.ModeMagnet, settings.ModeTorrentFile:
+		return c.Library.DownloadDir()
+	}
+	return ""
+}
+
+// newBudget reserves, per volume, what every added / downloading release still
+// needs: its size minus the progress qBittorrent last reported (full size when
+// no progress is known yet, or in magnet / torrent_file mode where another app
+// downloads). Releases without a size reserve nothing. Store errors leave the
+// budget empty, so the guard falls back to the plain free-space check.
+func (s *Sched) newBudget(ctx context.Context, c settings.Settings) *diskBudget {
+	b := &diskBudget{reserved: map[string]int64{}}
+	if !(c.Conveyor.MinFreeGiB > 0) || c.Downloader.Mode == settings.ModeManual {
+		return b
+	}
+	rels, err := s.st.ReleasesByStatus(ctx, store.RelAdded, store.RelDownloading)
+	if err != nil {
+		return b
+	}
+	shows := map[int64]store.Show{}
+	for _, r := range rels {
+		if r.SizeBytes == nil || *r.SizeBytes <= 0 {
+			continue
+		}
+		sh, ok := shows[r.ShowID]
+		if !ok {
+			sh, err = s.st.GetShow(ctx, r.ShowID)
+			if err != nil {
+				continue
+			}
+			shows[r.ShowID] = sh
+		}
+		dir := downloadDirFor(c, sh)
+		if dir == "" {
+			continue
+		}
+		remaining := *r.SizeBytes - int64(float64(*r.SizeBytes)*s.progressOf(r.QbitHash))
+		if remaining > 0 {
+			b.reserved[diskfree.Volume(dir)] += remaining
+		}
+	}
+	return b
+}
+
 // roomFor is the free-space guard before an AUTOMATIC hand-off (SPEC v1.1
 // section 10): false (and one release.waiting event per episode) when
-// free - size_bytes < conveyor.min_free_gib. ForceAdd and Download all missing
-// do not call it. The folder read: qBittorrent mode = the show's save path
-// (the download folder unless the show has an absolute folder), magnet /
-// torrent_file = DownloadDir(); no folder, manual mode (nothing is
+// free - reserved - size_bytes < conveyor.min_free_gib, where reserved is the
+// pass budget (running downloads + releases handed off earlier in the pass).
+// On true the release's size joins the budget. ForceAdd and Download all
+// missing do not call it. No download folder, manual mode (nothing is
 // downloaded), min_free_gib 0 or a free space that cannot be read = no check.
-func (s *Sched) roomFor(c settings.Settings, sh store.Show, ep int, rel store.Release) bool {
+func (s *Sched) roomFor(c settings.Settings, sh store.Show, ep int, rel store.Release, budget *diskBudget) bool {
 	if !(c.Conveyor.MinFreeGiB > 0) {
 		return true
 	}
-	dir := ""
-	switch c.Downloader.Mode {
-	case settings.ModeQbit:
-		dir = SavePath(c, sh)
-	case settings.ModeMagnet, settings.ModeTorrentFile:
-		dir = c.Library.DownloadDir()
-	}
+	dir := downloadDirFor(c, sh)
 	if dir == "" {
 		return true
 	}
@@ -315,15 +372,26 @@ func (s *Sched) roomFor(c settings.Settings, sh store.Show, ep int, rel store.Re
 	if rel.SizeBytes != nil && *rel.SizeBytes > 0 {
 		size = *rel.SizeBytes
 	}
+	vol := diskfree.Volume(dir)
+	var reserved int64
+	if budget != nil {
+		reserved = budget.reserved[vol]
+	}
 	keep := int64(c.Conveyor.MinFreeGiB * (1 << 30))
-	if free-size >= keep {
+	if free-reserved-size >= keep {
+		if budget != nil {
+			budget.reserved[vol] += size
+		}
 		return true
 	}
-	vol := diskfree.Volume(dir)
-	reason := "waiting, only " + strconv.FormatFloat(float64(max(free, 0))/(1<<30), 'f', 1, 64) + " GiB free on " + vol +
-		" (keeps " + strconv.FormatFloat(c.Conveyor.MinFreeGiB, 'f', -1, 64) + " GiB free)"
+	gib := func(n int64) string { return strconv.FormatFloat(float64(max(n, 0))/(1<<30), 'f', 1, 64) + " GiB" }
+	reason := "waiting, only " + gib(free) + " free on " + vol
+	if reserved > 0 {
+		reason += " and " + gib(reserved) + " of downloads still running"
+	}
+	reason += " (keeps " + strconv.FormatFloat(c.Conveyor.MinFreeGiB, 'f', -1, 64) + " GiB free)"
 	s.noteOnceKey(events.ReleaseWaiting, sh, ep, lowDiskKey, reason, map[string]any{
-		"reason": lowDiskKey, "free_bytes": free, "min_free_gib": c.Conveyor.MinFreeGiB,
+		"reason": lowDiskKey, "free_bytes": free, "reserved_bytes": reserved, "min_free_gib": c.Conveyor.MinFreeGiB,
 		"size_bytes": size, "volume": vol, "release_id": rel.ID,
 	})
 	return false
