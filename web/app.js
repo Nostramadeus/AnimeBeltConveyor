@@ -436,7 +436,9 @@
     const p = (show && show.progress) || {};
     const watched = p.watched || 0; const onDisk = p.on_disk || 0; const aired = p.aired || 0;
     const total = (show && show.episodes_total) || 0;
-    const scale = Math.max(total, aired, onDisk, watched, 1);
+    // The bar is always "of what has aired", never of the season total: a known total would
+    // make one card's bar mean something else than its neighbour's (the owner, 2026-10-23).
+    const scale = Math.max(aired, onDisk, watched, 1);
     return { watched, onDisk, aired, total, scale };
   }
   function progBar(show, withLegend = false) {

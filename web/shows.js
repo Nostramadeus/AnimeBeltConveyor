@@ -130,7 +130,7 @@
     const needle = st.q.trim().toLowerCase();
     let list = st.shows.filter((s) => st.filter === 'all' || s.list_status === st.filter);
     if (needle) list = list.filter((s) => [s.title, s.title_romaji, s.title_english].some((t) => t && t.toLowerCase().includes(needle)));
-    const ratio = (s) => { const g = progressOf(s); return g.watched / Math.max(g.total || g.aired, 1); };
+    const ratio = (s) => { const g = progressOf(s); return g.watched / Math.max(g.aired, 1); };
     // Leading brackets and quotes do not count ("[Oshi no Ko]" sorts under O).
     const key = (x) => showTitle(x).replace(/^[^\p{L}\p{N}]+/u, '');
     const byTitle = (a, b) => key(a).localeCompare(key(b), undefined, { sensitivity: 'base', numeric: true });

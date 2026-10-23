@@ -24,7 +24,7 @@
         <div class="eyebrow"><span class="bar"></span>Up next</div>
         <h3 class="up-hero-title clamp2"><a href="#/show/${e.show_id}">${title}</a></h3>
         <p class="up-ep"><b>Episode ${epNum(e.number, e.abs_number)}</b>${rel ? ` · ${rel}` : ''}</p>
-        <p class="up-meta">${e.aired_at ? h`<span title="${fFull(e.aired_at)}">Aired ${fRel(e.aired_at)}</span>` : ''}${show.id ? h`<span>${fNum(g.watched)} of ${fNum(g.total || g.aired)} watched</span>` : ''}</p>
+        <p class="up-meta">${e.aired_at ? h`<span title="${fFull(e.aired_at)}">Aired ${fRel(e.aired_at)}</span>` : ''}${show.id ? h`<span>${fNum(g.watched)} of ${fNum(g.aired)} aired watched</span>` : ''}</p>
         <div class="up-acts">
           ${f ? h`<button class="btn btn-primary btn-lg" data-act="play" data-file="${f.id}" data-show="${e.show_id}" data-label="episode ${e.number}">${ico('play')}Play</button>` : ''}
           <button class="btn" data-act="watched" data-show="${e.show_id}" data-ep="${e.number}" data-val="1" aria-label="Mark ${title} episode ${e.number} watched">${ico('check')}Watched</button>
