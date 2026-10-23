@@ -57,7 +57,7 @@ func TestAbsOffsetWalk(t *testing.T) {
 		return itoa(*p)
 	}
 	walk := func(self int, p *RelNode) (string, error) {
-		v, err := e.s.walkPrequels(ctx, self, p)
+		v, err := e.s.walkPrequels(ctx, self, RelTitles{Romaji: "Show 4th Season"}, p)
 		return val(v), err
 	}
 	// no prequel: known 0, no request
@@ -66,49 +66,49 @@ func TestAbsOffsetWalk(t *testing.T) {
 	}
 	// Black Clover 2026 -> Black Clover (170) -> nothing before it
 	b.prequels = map[int]prequelHop{97940: {eps: 170}}
-	if got, err := walk(999, &RelNode{ID: 97940, Episodes: 170}); got != "170" || err != nil {
+	if got, err := walk(999, &RelNode{ID: 97940, Episodes: 170, TitleRomaji: "Show"}); got != "170" || err != nil {
 		t.Fatalf("one hop = %s %v", got, err)
 	}
 	// three seasons: 12 + 13 + 24, the edge counts are summed (the fetched own count is ignored)
 	b.prequels = map[int]prequelHop{
-		3: {eps: 999, next: &RelNode{ID: 2, Episodes: 13}},
-		2: {eps: 13, next: &RelNode{ID: 1, Episodes: 12}},
+		3: {eps: 999, next: &RelNode{ID: 2, Episodes: 13, TitleRomaji: "Show 2nd Season"}},
+		2: {eps: 13, next: &RelNode{ID: 1, Episodes: 12, TitleRomaji: "Show"}},
 		1: {eps: 12},
 	}
-	s4 := &RelNode{ID: 3, Episodes: 24}
+	s4 := &RelNode{ID: 3, Episodes: 24, TitleRomaji: "Show 3rd Season"}
 	b.resetCalls()
 	if got, err := walk(4, s4); got != "49" || err != nil || len(b.calls()) != 3 {
 		t.Fatalf("chain = %s %v, calls %v", got, err, b.calls())
 	}
 	// a prequel with an unknown episode count: cannot be summed, no error
-	b.prequels[2] = prequelHop{eps: 13, next: &RelNode{ID: 1, Episodes: 0}}
+	b.prequels[2] = prequelHop{eps: 13, next: &RelNode{ID: 1, Episodes: 0, TitleRomaji: "Show"}}
 	if got, err := walk(4, s4); got != "nil" || err != nil {
 		t.Fatalf("unknown count = %s %v, want nil nil", got, err)
 	}
 	// a fetch error: nil plus the error
-	b.prequels[2] = prequelHop{eps: 13, next: &RelNode{ID: 1, Episodes: 12}}
+	b.prequels[2] = prequelHop{eps: 13, next: &RelNode{ID: 1, Episodes: 12, TitleRomaji: "Show"}}
 	b.prequelErr = errors.New("AniList down")
 	if got, err := walk(4, s4); got != "nil" || err == nil {
 		t.Fatalf("fetch error = %s %v, want nil + error", got, err)
 	}
 	b.prequelErr = nil
 	// a cycle back to an earlier node: cannot be summed
-	b.prequels[1] = prequelHop{eps: 12, next: &RelNode{ID: 3, Episodes: 24}}
+	b.prequels[1] = prequelHop{eps: 12, next: &RelNode{ID: 3, Episodes: 24, TitleRomaji: "Show 3rd Season"}}
 	if got, err := walk(4, s4); got != "nil" || err != nil {
 		t.Fatalf("cycle = %s %v, want nil nil", got, err)
 	}
 	// endless chain: stops at 30 hops
 	b.prequels = map[int]prequelHop{}
 	for id := 100; id < 200; id++ {
-		b.prequels[id] = prequelHop{eps: 1, next: &RelNode{ID: id + 1, Episodes: 1}}
+		b.prequels[id] = prequelHop{eps: 1, next: &RelNode{ID: id + 1, Episodes: 1, TitleRomaji: "Show"}}
 	}
 	b.resetCalls()
-	if got, err := walk(1, &RelNode{ID: 100, Episodes: 1}); got != "nil" || err != nil || len(b.calls()) != maxPrequelHops {
+	if got, err := walk(1, &RelNode{ID: 100, Episodes: 1, TitleRomaji: "Show"}); got != "nil" || err != nil || len(b.calls()) != maxPrequelHops {
 		t.Fatalf("hop cap = %s %v after %d calls", got, err, len(b.calls()))
 	}
 	// 30 prequels is still fine
 	b.prequels[129] = prequelHop{eps: 1}
-	if got, _ := walk(1, &RelNode{ID: 100, Episodes: 1}); got != "30" {
+	if got, _ := walk(1, &RelNode{ID: 100, Episodes: 1, TitleRomaji: "Show"}); got != "30" {
 		t.Fatalf("30 hops = %s, want 30", got)
 	}
 	// what gets stored
@@ -131,9 +131,9 @@ func TestAbsOffsetBackfill(t *testing.T) {
 	// finished show that already has a value: never asked
 	known := e.show(t, store.Show{AniListID: 600, TitleRomaji: "Known", Status: "FINISHED", AbsOffset: store.Ptr(12)})
 	b.prequels = map[int]prequelHop{
-		145064: {eps: 23, next: &RelNode{ID: 113415, Episodes: 24}},
+		145064: {eps: 23, next: &RelNode{ID: 113415, Episodes: 24, TitleRomaji: "Jujutsu Kaisen"}},
 		113415: {eps: 24},
-		500:    {eps: 12, next: &RelNode{ID: 499, Episodes: 0}},
+		500:    {eps: 12, next: &RelNode{ID: 499, Episodes: 0, TitleRomaji: "Long Runner"}},
 	}
 	b.prequelErr = errors.New("AniList down")
 	e.s.airingRun(ctx)
@@ -167,7 +167,7 @@ func TestAbsOffsetBackfill(t *testing.T) {
 	}
 	// Refresh re-walks a -1 regardless (Media has the prequel now known)
 	b.media[500] = Media{MediaSummary: MediaSummary{ID: 500, TitleRomaji: "Long Runner Part 2", Status: "FINISHED", Episodes: 12},
-		Prequel: &RelNode{ID: 499, Format: "TV", Episodes: 50}}
+		Prequel: &RelNode{ID: 499, Format: "TV", Episodes: 50, TitleRomaji: "Long Runner"}}
 	b.prequels[499] = prequelHop{eps: 50}
 	if _, err := e.s.RefreshShow(ctx, unk.ID); err != nil {
 		t.Fatal(err)
@@ -179,8 +179,8 @@ func TestAbsOffsetBackfill(t *testing.T) {
 		t.Fatal("known value changed")
 	}
 	// an added show whose chain cannot be summed is stored as -1 at once
-	b.media[700] = Media{MediaSummary: MediaSummary{ID: 700, TitleRomaji: "Sequel of the unknown", Status: "RELEASING", Episodes: 12},
-		Prequel: &RelNode{ID: 698, Format: "TV", Episodes: 0}}
+	b.media[700] = Media{MediaSummary: MediaSummary{ID: 700, TitleRomaji: "Unknown Show 2nd Season", Status: "RELEASING", Episodes: 12},
+		Prequel: &RelNode{ID: 698, Format: "TV", Episodes: 0, TitleRomaji: "Unknown Show"}}
 	s7, _, err := e.s.AddShow(ctx, 700, "")
 	if err != nil || s7.AbsOffset == nil || *s7.AbsOffset != AbsUnknown {
 		t.Fatalf("add with an unknown chain = %v %v, want -1", s7.AbsOffset, err)
@@ -213,7 +213,7 @@ func TestAbsOffsetAddRefreshAiring(t *testing.T) {
 	ctx := context.Background()
 	b := e.brain
 	b.media[145064] = Media{MediaSummary: MediaSummary{ID: 145064, TitleRomaji: "Jujutsu Kaisen 2nd Season", Status: "RELEASING", Episodes: 23},
-		Prequel: &RelNode{ID: 113415, Format: "TV", Episodes: 24}}
+		Prequel: &RelNode{ID: 113415, Format: "TV", Episodes: 24, TitleRomaji: "Jujutsu Kaisen"}}
 	b.prequels = map[int]prequelHop{113415: {eps: 24}}
 	sh, created, err := e.s.AddShow(ctx, 145064, "")
 	if err != nil || !created || sh.AbsOffset == nil || *sh.AbsOffset != 24 {
@@ -248,7 +248,7 @@ func TestAbsOffsetAddRefreshAiring(t *testing.T) {
 		t.Fatalf("NULL -> 24 is a change: events = %q", ev)
 	}
 	// Refresh always walks; a changed value is logged
-	b.prequels[113415] = prequelHop{eps: 24, next: &RelNode{ID: 1, Episodes: 2}}
+	b.prequels[113415] = prequelHop{eps: 24, next: &RelNode{ID: 1, Episodes: 2, TitleRomaji: "Jujutsu Kaisen (2019)"}}
 	b.prequels[1] = prequelHop{eps: 2}
 	b.resetCalls()
 	if _, err := e.s.RefreshShow(ctx, sh.ID); err != nil {
@@ -270,8 +270,8 @@ func TestAbsOffsetAddRefreshAiring(t *testing.T) {
 	}
 	// AniList down during the walk: the add still works, abs_offset NULL (not computed; the next airing pass retries), no event
 	b.prequelErr = errors.New("AniList down")
-	b.media[200] = Media{MediaSummary: MediaSummary{ID: 200, TitleRomaji: "Sequel", Status: "FINISHED", Episodes: 12},
-		Prequel: &RelNode{ID: 199, Format: "TV", Episodes: 12}}
+	b.media[200] = Media{MediaSummary: MediaSummary{ID: 200, TitleRomaji: "Sequel 2nd Season", Status: "FINISHED", Episodes: 12},
+		Prequel: &RelNode{ID: 199, Format: "TV", Episodes: 12, TitleRomaji: "Sequel"}}
 	s2, created, err := e.s.AddShow(ctx, 200, "")
 	if err != nil || !created || s2.AbsOffset != nil {
 		t.Fatalf("add with failing walk: %v %v %v", created, err, s2.AbsOffset)
@@ -326,5 +326,80 @@ func TestAbsOffsetConveyorAndScan(t *testing.T) {
 	}
 	if got["[SubsPlease] Black Clover - 172 (1080p).mkv"] != 2 || got["[Erai-raws] Black Clover - 04 [1080p].mkv"] != 4 {
 		t.Fatalf("files = %v", got)
+	}
+}
+
+// Follow-up D: the six chains from the brief. The walk stops at the first
+// prequel of another series (JoJo restarts its numbering every part).
+func TestChainStopsAtSeries(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	b := e.brain
+	const (
+		jojo2012 = "JoJo no Kimyou na Bouken (2012)"
+		sc       = "JoJo no Kimyou na Bouken: Stardust Crusaders"
+		so       = "JoJo no Kimyou na Bouken: Stone Ocean"
+		sbr      = "JoJo no Kimyou na Bouken: Steel Ball Run"
+	)
+	b.prequels = map[int]prequelHop{
+		9001:   {eps: 12, next: &RelNode{ID: 9000, Format: "ONA", Episodes: 38, TitleRomaji: so}}, // SBR -> Stone Ocean
+		9000:   {eps: 38, next: &RelNode{ID: 8000, Format: "TV", Episodes: 39, TitleRomaji: "JoJo no Kimyou na Bouken: Ougon no Kaze"}},
+		2001:   {eps: 24, next: &RelNode{ID: 2000, Format: "TV", Episodes: 26, TitleRomaji: jojo2012}}, // Stardust Crusaders -> 2012
+		97940:  {eps: 170},                                                                             // Black Clover: nothing before it
+		3002:   {eps: 24, next: &RelNode{ID: 3001, Format: "TV", Episodes: 24, TitleRomaji: "Kusuriya no Hitorigoto"}},
+		3001:   {eps: 24},
+		113415: {eps: 24}, // Jujutsu Kaisen: JJK 0 is a movie, pickPrequel never offers it
+	}
+	media := func(id int, romaji string, p *RelNode) Media {
+		return Media{MediaSummary: MediaSummary{ID: id, TitleRomaji: romaji}, Prequel: p}
+	}
+	cases := []struct {
+		name  string
+		m     Media
+		want  string
+		calls []int // the prequels fetched; a stop costs no request
+	}{
+		{"SBR 2nd & 3rd STAGE stops at Stone Ocean", media(9002, sbr+" - 2nd & 3rd STAGE", &RelNode{ID: 9001, Format: "ONA", Episodes: 12, TitleRomaji: sbr}), "12", []int{9001}},
+		{"Egypt-hen counts Stardust Crusaders, stops at the 2012 series", media(2002, sc+" - Egypt-hen", &RelNode{ID: 2001, Format: "TV", Episodes: 24, TitleRomaji: sc}), "24", []int{2001}},
+		{"Stardust Crusaders: the 2012 series is another part", media(2001, sc, &RelNode{ID: 2000, Format: "TV", Episodes: 26, TitleRomaji: jojo2012}), "0", nil},
+		{"Black Clover 2nd Season", media(195604, "Black Clover 2nd Season", &RelNode{ID: 97940, Format: "TV", Episodes: 170, TitleRomaji: "Black Clover"}), "170", []int{97940}},
+		{"Kusuriya 3rd Season", media(3003, "Kusuriya no Hitorigoto 3rd Season", &RelNode{ID: 3002, Format: "TV", Episodes: 24, TitleRomaji: "Kusuriya no Hitorigoto 2nd Season"}), "48", []int{3002, 3001}},
+		{"Jujutsu Kaisen 2nd Season", media(145064, "Jujutsu Kaisen 2nd Season", &RelNode{ID: 113415, Format: "TV", Episodes: 24, TitleRomaji: "Jujutsu Kaisen"}), "24", []int{113415}},
+	}
+	for _, c := range cases {
+		b.resetCalls()
+		got := e.s.absOffset(ctx, c.m)
+		v := "nil"
+		if got != nil {
+			v = itoa(*got)
+		}
+		calls := b.calls()
+		same := len(calls) == len(c.calls)
+		for i := range calls {
+			same = same && calls[i] == c.calls[i]
+		}
+		if v != c.want || !same {
+			t.Errorf("%s: abs_offset %s (calls %v), want %s (calls %v)", c.name, v, calls, c.want, c.calls)
+		}
+	}
+}
+
+func TestSameSeries(t *testing.T) {
+	cases := []struct {
+		a, b RelTitles
+		want bool
+	}{
+		{RelTitles{Romaji: "Black Clover 2nd Season"}, RelTitles{Romaji: "Black Clover"}, true},
+		{RelTitles{Romaji: "Shingeki no Kyojin: The Final Season"}, RelTitles{Romaji: "Shingeki no Kyojin Season 3 Part 2"}, true},
+		{RelTitles{Romaji: "JoJo no Kimyou na Bouken: Stardust Crusaders"}, RelTitles{Romaji: "JoJo no Kimyou na Bouken (2012)"}, false}, // equality, not prefix
+		{RelTitles{Romaji: "Tensei shitara Slime 2", English: "That Time I Got Reincarnated as a Slime Season 2"},
+			RelTitles{Romaji: "Tensei shitara Slime Datta Ken", English: "That Time I Got Reincarnated as a Slime"}, true}, // English alone is enough
+		{RelTitles{Romaji: "", English: ""}, RelTitles{Romaji: "", English: ""}, false}, // empty never matches
+		{RelTitles{Romaji: "Show", English: ""}, RelTitles{Romaji: "Other", English: ""}, false},
+	}
+	for _, c := range cases {
+		if got := sameSeries(c.a, c.b); got != c.want {
+			t.Errorf("sameSeries(%+v, %+v) = %v, want %v", c.a, c.b, got, c.want)
+		}
 	}
 }

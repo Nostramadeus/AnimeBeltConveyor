@@ -10,3 +10,5 @@ PROGRESS-*.md
 web/.shot-*.png
 *.exe~
 desktop.ini
+*.exe.new
+*.exe~

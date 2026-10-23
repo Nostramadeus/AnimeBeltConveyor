@@ -126,7 +126,32 @@ func run() error {
 	slog.SetDefault(slog.New(slog.NewTextHandler(logOut, nil)))
 	slog.Info("starting", "version", version, "data", dir, "data_source", source)
 
-	db, err := store.Open(filepath.Join(dir, "abc.db"))
+	// A second double-click on abc.exe / abcw.exe: show the running instance instead of
+	// failing. Checked BEFORE store.Open, because Open migrates the database and a newer
+	// build started next to an older running one must not migrate under it.
+	showExisting := func(url string) error {
+		slog.Info("already running, opening the existing window", "url", url)
+		fmt.Println("ABC is already running at " + url)
+		if !*noBrowser {
+			if err := sched.OpenURL(url); err != nil {
+				slog.Warn("could not open the browser", "err", err)
+			}
+		}
+		return nil
+	}
+	dbPath := filepath.Join(dir, "abc.db")
+	probe := *portFlag
+	if probe == 0 {
+		probe = store.PeekServerPort(dbPath)
+	}
+	if probe == 0 {
+		probe = 7700 // the settings default
+	}
+	if u := "http://127.0.0.1:" + strconv.Itoa(probe) + "/"; alreadyRunning(u) {
+		return showExisting(u)
+	}
+
+	db, err := store.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
 	}
@@ -147,15 +172,7 @@ func run() error {
 	if err != nil {
 		url := "http://" + addr + "/"
 		if alreadyRunning(url) {
-			// A second double-click on abc.exe / abcw.exe: show the running instance instead of failing.
-			slog.Info("already running, opening the existing window", "url", url)
-			fmt.Println("ABC is already running at " + url)
-			if !*noBrowser {
-				if err := sched.OpenURL(url); err != nil {
-					slog.Warn("could not open the browser", "err", err)
-				}
-			}
-			return nil
+			return showExisting(url)
 		}
 		return fmt.Errorf("cannot listen on %s (another program uses the port; change Settings > Server > port or run with --port): %w", addr, err)
 	}

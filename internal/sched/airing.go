@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Nostramadeus/AnimeBeltConveyor/internal/events"
+	"github.com/Nostramadeus/AnimeBeltConveyor/internal/match"
 	"github.com/Nostramadeus/AnimeBeltConveyor/internal/scan"
 	"github.com/Nostramadeus/AnimeBeltConveyor/internal/store"
 )
@@ -203,21 +204,52 @@ const maxPrequelHops = 30
 // user's Refresh does. The API shows it as null.
 const AbsUnknown = -1
 
+// RelTitles are the titles a step of the prequel chain is compared by.
+type RelTitles struct {
+	Romaji  string
+	English string
+}
+
+func (r RelNode) titles() RelTitles { return RelTitles{Romaji: r.TitleRomaji, English: r.TitleEnglish} }
+
+// sameSeries reports whether a and b are seasons of the same series: equal
+// title bases (match.BaseTitle) in romaji or in English, both non-empty.
+// Equality only, never a prefix: "JoJo no Kimyou na Bouken (2012)" is not
+// "JoJo no Kimyou na Bouken: Stardust Crusaders" (SPEC v1.3 follow-up D).
+func sameSeries(a, b RelTitles) bool {
+	if x, y := match.BaseTitle(a.Romaji), match.BaseTitle(b.Romaji); x != "" && x == y {
+		return true
+	}
+	if x, y := match.BaseTitle(a.English), match.BaseTitle(b.English); x != "" && x == y {
+		return true
+	}
+	return false
+}
+
 // walkPrequels walks AniList's prequel chain starting at p, the prequel of
-// show selfID (SPEC v1.3 section 1.2): the sum of the episode counts of every
-// prequel, 0 when there is no prequel; (nil, nil) when the chain cannot be
-// summed; (nil, err) when an AniList request failed.
-func (s *Sched) walkPrequels(ctx context.Context, selfID int, p *RelNode) (*int, error) {
+// show selfID titled self (SPEC v1.3 section 1.2, follow-up D): the sum of
+// the episode counts of the prequels of the same series. The walk stops,
+// with the sum so far, at the first prequel whose title base differs from the
+// entry after it (a series that restarts its numbering per part, like JoJo,
+// stops at the part); 0 when there is no prequel or the first one is another
+// series. (nil, nil) when the chain cannot be summed (a prequel without an
+// episode count, a loop, more than maxPrequelHops hops); (nil, err) when an
+// AniList request failed.
+func (s *Sched) walkPrequels(ctx context.Context, selfID int, self RelTitles, p *RelNode) (*int, error) {
 	if p == nil {
 		return store.Ptr(0), nil
 	}
 	sum := 0
+	cur := self
 	seen := map[int]bool{selfID: true}
 	for hop := 0; hop < maxPrequelHops; hop++ {
 		if seen[p.ID] {
 			return nil, nil // cycle
 		}
 		seen[p.ID] = true
+		if !sameSeries(cur, p.titles()) {
+			return &sum, nil // another series: numbering restarts after it
+		}
 		if p.Episodes <= 0 {
 			return nil, nil // a prequel's episode count is unknown
 		}
@@ -230,6 +262,7 @@ func (s *Sched) walkPrequels(ctx context.Context, selfID int, p *RelNode) (*int,
 		if next == nil {
 			return &sum, nil
 		}
+		cur = p.titles()
 		p = next
 	}
 	return nil, nil // hop cap
@@ -251,7 +284,7 @@ func absToStore(sum *int, err error) *int {
 // absOffset walks m's prequel chain and returns the abs_offset to store. It
 // never fails the caller.
 func (s *Sched) absOffset(ctx context.Context, m Media) *int {
-	return absToStore(s.walkPrequels(ctx, m.ID, m.Prequel))
+	return absToStore(s.walkPrequels(ctx, m.ID, RelTitles{Romaji: m.TitleRomaji, English: m.TitleEnglish}, m.Prequel))
 }
 
 // backfillAbsOffset computes abs_offset for a show the airing refresh skips
@@ -264,7 +297,7 @@ func (s *Sched) backfillAbsOffset(ctx context.Context, sh store.Show) {
 		slog.Debug("prequel chain", "anilist_id", sh.AniListID, "err", err)
 		return
 	}
-	abs := absToStore(s.walkPrequels(ctx, int(sh.AniListID), p))
+	abs := absToStore(s.walkPrequels(ctx, int(sh.AniListID), RelTitles{Romaji: sh.TitleRomaji, English: sh.TitleEnglish}, p))
 	if abs == nil {
 		return
 	}

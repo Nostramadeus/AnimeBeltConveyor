@@ -428,7 +428,7 @@ func TestQueriesMentionSpecFields(t *testing.T) {
 }
 
 func TestQueriesAskForRelations(t *testing.T) {
-	want := "relations { edges { relationType node { id type format episodes seasonYear startDate { year month day } } } }"
+	want := "relations { edges { relationType node { id type format episodes seasonYear title { romaji english } startDate { year month day } } } }"
 	if !strings.Contains(QueryMedia, want) || !strings.Contains(QueryRelations, want) {
 		t.Error("QueryMedia / QueryRelations lack the relations block")
 	}
@@ -472,8 +472,10 @@ func TestPickPrequel(t *testing.T) {
 			t.Errorf("%s: picked %d, want %d", c.name, gotID, c.want)
 		}
 	}
-	p := pickPrequel([]rawEdge{edge("PREQUEL", 113415, "ANIME", "TV", 24, 2020, 10, 3)})
-	if *p != (RelNode{ID: 113415, Format: "TV", Episodes: 24, StartDate: 20201003}) {
+	e := edge("PREQUEL", 113415, "ANIME", "TV", 24, 2020, 10, 3)
+	e.Node.Title.Romaji, e.Node.Title.English = "Jujutsu Kaisen", "JUJUTSU KAISEN"
+	p := pickPrequel([]rawEdge{e})
+	if *p != (RelNode{ID: 113415, Format: "TV", Episodes: 24, StartDate: 20201003, TitleRomaji: "Jujutsu Kaisen", TitleEnglish: "JUJUTSU KAISEN"}) {
 		t.Errorf("RelNode = %+v", *p)
 	}
 }
@@ -485,7 +487,8 @@ func TestMediaReadsPrequel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Prequel == nil || m.Prequel.ID != 113415 || m.Prequel.Episodes != 24 || m.Prequel.Format != "TV" || m.Prequel.StartDate != 20201003 {
+	if m.Prequel == nil || m.Prequel.ID != 113415 || m.Prequel.Episodes != 24 || m.Prequel.Format != "TV" || m.Prequel.StartDate != 20201003 ||
+		m.Prequel.TitleRomaji != "Jujutsu Kaisen" || m.Prequel.TitleEnglish != "JUJUTSU KAISEN" {
 		t.Fatalf("prequel = %+v", m.Prequel)
 	}
 	if rec.count() != 1 {
@@ -503,7 +506,7 @@ func TestPrequelHop(t *testing.T) {
 	_, c := fakeAniList(t, rec)
 	ctx := context.Background()
 	eps, p, err := c.Prequel(ctx, 145064)
-	if err != nil || eps != 23 || p == nil || p.ID != 113415 || p.Episodes != 24 {
+	if err != nil || eps != 23 || p == nil || p.ID != 113415 || p.Episodes != 24 || p.TitleRomaji != "Jujutsu Kaisen" {
 		t.Fatalf("Prequel(145064) = %d %+v %v", eps, p, err)
 	}
 	eps, p, err = c.Prequel(ctx, 113415)

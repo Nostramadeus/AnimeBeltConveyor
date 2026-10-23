@@ -164,11 +164,13 @@ type Media struct {
 // RelNode mirrors anilist.RelNode (one prequel of the chain). StartDate is
 // yyyymmdd, 0 = unknown.
 type RelNode struct {
-	ID         int
-	Format     string
-	Episodes   int // 0 = unknown
-	SeasonYear int
-	StartDate  int64
+	ID           int
+	Format       string
+	Episodes     int // 0 = unknown
+	SeasonYear   int
+	StartDate    int64
+	TitleRomaji  string
+	TitleEnglish string
 }
 
 // AiringNode is one airingSchedule entry.

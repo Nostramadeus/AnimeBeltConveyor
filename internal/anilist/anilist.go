@@ -61,11 +61,13 @@ type Media struct {
 // RelNode is one related anime of the prequel chain. StartDate is yyyymmdd as
 // a sortable number (20231001), 0 = unknown.
 type RelNode struct {
-	ID         int    `json:"id"`
-	Format     string `json:"format"`
-	Episodes   int    `json:"episodes"` // 0 = unknown
-	SeasonYear int    `json:"season_year"`
-	StartDate  int64  `json:"start_date"`
+	ID           int    `json:"id"`
+	Format       string `json:"format"`
+	Episodes     int    `json:"episodes"` // 0 = unknown
+	SeasonYear   int    `json:"season_year"`
+	StartDate    int64  `json:"start_date"`
+	TitleRomaji  string `json:"title_romaji"`  // the chain walk stops where the title base changes
+	TitleEnglish string `json:"title_english"` // "" when AniList has none
 }
 
 // AiringNode is one airingSchedule entry. AiringAt is unix seconds UTC.
@@ -175,7 +177,7 @@ func (c *Client) take(ctx context.Context) error {
 const mediaFields = `id idMal title { romaji english native } coverImage { extraLarge color } bannerImage format status season seasonYear episodes averageScore nextAiringEpisode { episode airingAt }`
 
 // relationFields are the related-media fields the prequel chain needs.
-const relationFields = `relations { edges { relationType node { id type format episodes seasonYear startDate { year month day } } } }`
+const relationFields = `relations { edges { relationType node { id type format episodes seasonYear title { romaji english } startDate { year month day } } } }`
 
 // QueryMedia is used for Media and MediaByMalID; variables id or idMal, page.
 // relations are sent on every page; only page 1's are read.
@@ -265,7 +267,11 @@ type rawEdge struct {
 		Format     string `json:"format"`
 		Episodes   int    `json:"episodes"`
 		SeasonYear int    `json:"seasonYear"`
-		StartDate  struct {
+		Title      struct {
+			Romaji  string `json:"romaji"`
+			English string `json:"english"`
+		} `json:"title"`
+		StartDate struct {
 			Year  int `json:"year"`
 			Month int `json:"month"`
 			Day   int `json:"day"`
@@ -296,7 +302,7 @@ func pickPrequel(edges []rawEdge) *RelNode {
 		if n.Format != "TV" && n.Format != "TV_SHORT" && n.Format != "ONA" {
 			continue
 		}
-		rn := RelNode{ID: n.ID, Format: n.Format, Episodes: n.Episodes, SeasonYear: n.SeasonYear}
+		rn := RelNode{ID: n.ID, Format: n.Format, Episodes: n.Episodes, SeasonYear: n.SeasonYear, TitleRomaji: n.Title.Romaji, TitleEnglish: n.Title.English}
 		if n.StartDate.Year > 0 {
 			rn.StartDate = int64(n.StartDate.Year)*10000 + int64(n.StartDate.Month)*100 + int64(n.StartDate.Day)
 		} else {
