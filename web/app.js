@@ -908,7 +908,8 @@
         </div></td></tr>` : '';
       return h`${row}${pick}`;
     });
-    const files = (d.files || []).slice().sort((a, b) => (b.episode || 0) - (a.episode || 0));
+    // Files that vanished (present=false) stay in the database for the replace/v2 logic but are not shown.
+    const files = (d.files || []).filter((f) => f.present !== false && f.present !== 0).sort((a, b) => (b.episode || 0) - (a.episode || 0));
     return h`<section class="surface panel">
       <div class="panel-head"><h2>Episodes<span class="count">${eps.length || ''}</span></h2>${stateLegend()}</div>
       ${eps.length ? h`<table class="ep-table">
