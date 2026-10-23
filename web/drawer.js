@@ -68,13 +68,19 @@
     const named = show && [show.title, show.title_romaji, show.title_english].some((t) => t && low.includes(t.toLowerCase()));
     return { named, show, html: named ? h`<a href="#/show/${show.id}">${msg}</a>` : msg };
   }
+  /** The raw error text behind a plain-words error line (data.detail), folded under "Details". */
+  function detailHtml(ev) {
+    const d = ev.data && typeof ev.data === 'object' ? ev.data.detail : null;
+    if (typeof d !== 'string' || !d || d === ev.message) return '';
+    return h`<details class="feed-detail"><summary>Details</summary><code>${d}</code></details>`;
+  }
   function itemHtml(ev) {
     const [icon, tone] = KIND[ev.kind] || ['bolt', ''];
     const m = msgHtml(ev);
     return h`<li class="feed-item ${D.flash.has(ev.id) ? 'is-new' : ''}" data-id="${ev.id}">
       <span class="feed-icon ${tone}" title="${ev.kind}">${ico(icon)}</span>
       <div class="feed-body"><div class="feed-msg">${m.html}</div>
-      <div class="feed-meta">${m.show && !m.named ? h`<a href="#/show/${m.show.id}">${showTitle(m.show)}</a> · ` : ''}${timeEl(ev.ts)}</div></div>
+      <div class="feed-meta">${m.show && !m.named ? h`<a href="#/show/${m.show.id}">${showTitle(m.show)}</a> · ` : ''}${timeEl(ev.ts)}</div>${detailHtml(ev)}</div>
     </li>`;
   }
   function groupHtml(g) {
@@ -89,7 +95,7 @@
       <div class="feed-body">
         <div class="feed-msg">${show ? h`<a href="#/show/${show.id}">${groupText(g)}</a>` : groupText(g)}</div>
         <div class="feed-meta">${fNum(g.items.length)} events · ${timeEl(top.ts)}</div>
-        <ul class="feed-sub" id="fg-${g.key}" ${open ? '' : ABC.raw('hidden')}>${g.items.map((ev) => h`<li><span class="feed-msg">${msgHtml(ev).html}</span> <span class="feed-meta">${timeEl(ev.ts)}</span></li>`)}</ul>
+        <ul class="feed-sub" id="fg-${g.key}" ${open ? '' : ABC.raw('hidden')}>${g.items.map((ev) => h`<li><span class="feed-msg">${msgHtml(ev).html}</span> <span class="feed-meta">${timeEl(ev.ts)}</span>${detailHtml(ev)}</li>`)}</ul>
       </div>
       <button type="button" class="btn btn-sm btn-ghost btn-icon feed-exp" data-group="${g.key}" aria-expanded="${String(open)}" aria-controls="fg-${g.key}" aria-label="${open ? 'Hide' : 'Show'} the ${fNum(g.items.length)} events">${ico('chevD')}</button>
     </li>`;

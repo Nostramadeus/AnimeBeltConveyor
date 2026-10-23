@@ -230,9 +230,15 @@ func (s *Sched) runLocked(l *loop, fn func(context.Context) error) {
 		return
 	}
 	slog.Warn("loop failed", "loop", l.name, "err", err)
-	if msg := err.Error(); msg != l.lastErr {
-		l.lastErr = msg
-		s.ev.Log(events.Error, 0, 0, l.name+": "+msg, map[string]any{"loop": l.name})
+	if raw := err.Error(); raw != l.lastErr {
+		l.lastErr = raw
+		var retry time.Duration
+		if l.interval != nil {
+			retry = l.interval(s.set.Get())
+		}
+		// Plain words first (plain.go); the raw Go error stays in data.detail for the Details fold.
+		s.ev.Log(events.Error, 0, 0, loopErrorMessage(l.name, err, retry),
+			map[string]any{"loop": l.name, "detail": raw, "retry_sec": int(retry.Seconds())})
 	}
 }
 
