@@ -294,7 +294,12 @@ func (s *Sched) markGone(ctx context.Context, gone []store.File) error {
 		}
 		sh, _ := s.st.GetShow(ctx, *g.ShowID)
 		ep := deref(g.Episode)
-		s.ev.Log(events.FileMissing, *g.ShowID, ep, title(sh)+" "+epLabel(ep)+": file gone ("+filepath.Base(g.Path)+")",
+		// Deleted or moved outside ABC. A finished release is never picked again, so say so.
+		next := "ABC will not download it again by itself; press Add on the episode if you want it back"
+		if e, err := s.st.GetEpisode(ctx, *g.ShowID, ep); err == nil && e.WatchedAt != nil {
+			next = "already watched, so nothing is lost"
+		}
+		s.ev.Log(events.FileMissing, *g.ShowID, ep, title(sh)+" "+epLabel(ep)+": file gone from disk ("+filepath.Base(g.Path)+"). "+next+".",
 			map[string]any{"file_id": g.ID, "path": g.Path})
 	}
 	return nil

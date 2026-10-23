@@ -1,13 +1,18 @@
 package sched
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Nostramadeus/AnimeBeltConveyor/internal/events"
 )
 
 // Plain-language errors for the Updates feed. Go network errors read like
@@ -109,32 +114,86 @@ func isTimeout(err error) bool {
 // the step that failed, the plain explanation and when the next try is.
 // Example: Release search failed while searching "black clover": nyaa.si did
 // not answer in time. Check your internet connection or VPN; the site may
-// also be down. Next try in 30 min (and 2 more shows).
+// also be down. 2 more searches failed the same way. Next try in 30 min.
 // Without a translation it falls back to the label plus the raw error.
 func loopErrorMessage(name string, err error, retry time.Duration) string {
 	raw := err.Error()
 	more := ""
 	if m := reMore.FindStringSubmatch(raw); m != nil {
 		raw = strings.TrimSuffix(raw, m[0])
-		more = fmt.Sprintf(" (and %s more)", m[1])
+		if m[1] == "1" {
+			more = " 1 more search failed the same way."
+		} else {
+			more = fmt.Sprintf(" %s more searches failed the same way.", m[1])
+		}
 	}
 	plain, ok := plainError(err)
 	if !ok {
-		return loopLabel(name) + ": " + raw + more
+		return loopLabel(name) + ": " + err.Error()
 	}
 	step := ""
 	if m := reStep.FindStringSubmatch(raw); m != nil {
 		step = fmt.Sprintf(" while searching %q", m[1])
 	}
-	msg := loopLabel(name) + " failed" + step + ": " + plain + "."
-	tail := ""
+	msg := loopLabel(name) + " failed" + step + ": " + plain + "." + more
 	if retry > 0 {
-		tail = "Next try in " + humanDur(retry)
-	}
-	if tail += more; tail != "" {
-		msg += " " + strings.TrimSpace(tail) + "."
+		msg += " Next try in " + humanDur(retry) + "."
 	}
 	return msg
+}
+
+// rewordStoredErrors rewrites error rows written before plain-language
+// messages existed ("conveyor: nyaa ...: dial tcp ...") so the feed reads the
+// same for old and new rows. A row is done once data.detail is set. Rows the
+// translator does not understand are left alone.
+func (s *Sched) rewordStoredErrors(ctx context.Context) {
+	evs, err := s.st.ListEvents(ctx, 0, 1000)
+	if err != nil {
+		return
+	}
+	c := s.set.Get()
+	n := 0
+	for _, ev := range evs {
+		if ev.Kind != events.Error {
+			continue
+		}
+		var data map[string]any
+		if json.Unmarshal(ev.Data, &data) != nil || data == nil {
+			data = map[string]any{}
+		}
+		name, _ := data["loop"].(string)
+		raw, done := data["detail"].(string)
+		if done && !strings.Contains(ev.Message, "(and ") { // already reworded with the current wording
+			continue
+		}
+		if !done {
+			if name == "" || !strings.HasPrefix(ev.Message, name+": ") {
+				continue
+			}
+			raw = strings.TrimPrefix(ev.Message, name+": ")
+		}
+		if name == "" || raw == "" {
+			continue
+		}
+		if _, ok := plainError(errors.New(raw)); !ok {
+			continue
+		}
+		var retry time.Duration
+		for _, l := range s.loops() {
+			if l.name == name && l.interval != nil {
+				retry = l.interval(c)
+			}
+		}
+		data["detail"] = raw
+		data["retry_sec"] = int(retry.Seconds())
+		b, _ := json.Marshal(data)
+		if s.st.UpdateEvent(ctx, ev.ID, loopErrorMessage(name, errors.New(raw), retry), b) == nil {
+			n++
+		}
+	}
+	if n > 0 {
+		slog.Info("reworded stored error events", "rows", n)
+	}
 }
 
 func humanDur(d time.Duration) string {

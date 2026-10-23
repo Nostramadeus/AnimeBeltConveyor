@@ -35,6 +35,16 @@ func (d *DB) InsertEvent(ctx context.Context, e *Event) error {
 	return err
 }
 
+// UpdateEvent replaces the message and data of event id (used to reword
+// stored rows when the wording improves; the old text goes into data).
+func (d *DB) UpdateEvent(ctx context.Context, id int64, message string, data json.RawMessage) error {
+	if len(data) == 0 {
+		data = json.RawMessage("{}")
+	}
+	_, err := d.db.ExecContext(ctx, `UPDATE events SET message=?, data=? WHERE id=?`, message, string(data), id)
+	return err
+}
+
 // ListEvents returns events with id > after, newest first, at most limit (default 100, max 1000).
 func (d *DB) ListEvents(ctx context.Context, after int64, limit int) ([]Event, error) {
 	if limit <= 0 {

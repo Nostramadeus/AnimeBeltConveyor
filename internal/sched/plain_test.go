@@ -2,6 +2,7 @@ package sched
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Nostramadeus/AnimeBeltConveyor/internal/settings"
+	"github.com/Nostramadeus/AnimeBeltConveyor/internal/store"
 )
 
 func TestLoopErrorMessagePlainWords(t *testing.T) {
@@ -27,9 +29,9 @@ func TestLoopErrorMessagePlainWords(t *testing.T) {
 		{"conveyor", one, 30 * time.Minute,
 			`Release search failed while searching "black clover": nyaa.si did not answer in time. Check your internet connection or VPN; the site may also be down. Next try in 30 min.`},
 		{"conveyor", three, 30 * time.Minute,
-			`Release search failed while searching "black clover": nyaa.si did not answer in time. Check your internet connection or VPN; the site may also be down. Next try in 30 min (and 2 more).`},
+			`Release search failed while searching "black clover": nyaa.si did not answer in time. Check your internet connection or VPN; the site may also be down. 2 more searches failed the same way. Next try in 30 min.`},
 		{"conveyor", three, 0,
-			`Release search failed while searching "black clover": nyaa.si did not answer in time. Check your internet connection or VPN; the site may also be down. (and 2 more).`},
+			`Release search failed while searching "black clover": nyaa.si did not answer in time. Check your internet connection or VPN; the site may also be down. 2 more searches failed the same way.`},
 		{"airing", &url.Error{Op: "Post", URL: "https://graphql.anilist.co", Err: errors.New("dial tcp: lookup graphql.anilist.co: no such host")}, 6 * time.Hour,
 			`Airing update (AniList) failed: graphql.anilist.co could not be looked up (DNS failed). Check your internet connection or VPN. Next try in 6 h.`},
 		{"qbit", errors.New(`Post "http://127.0.0.1:8080/api/v2/auth/login": dial tcp 127.0.0.1:8080: connectex: No connection could be made because the target machine actively refused it.`), time.Minute,
@@ -44,6 +46,38 @@ func TestLoopErrorMessagePlainWords(t *testing.T) {
 	for _, c := range cases {
 		if got := loopErrorMessage(c.name, c.err, c.retry); got != c.want {
 			t.Errorf("%s / %v:\n got %q\nwant %q", c.name, c.err, got, c.want)
+		}
+	}
+}
+
+func TestRewordStoredErrors(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	old := &store.Event{Kind: "error", Message: `conveyor: nyaa "black clover": Get "https://nyaa.si/?q=black+clover": dial tcp 1.2.3.4:443: connectex: A connection attempt failed because the connected party did not properly respond after a period of time.`, Data: json.RawMessage(`{"loop":"conveyor"}`)}
+	keep := &store.Event{Kind: "error", Message: `scan: boom`, Data: json.RawMessage(`{"loop":"scan"}`)}
+	for _, ev := range []*store.Event{old, keep} {
+		if err := e.db.InsertEvent(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.s.rewordStoredErrors(ctx)
+	e.s.rewordStoredErrors(ctx) // second pass is a no-op
+	evs, _ := e.db.ListEvents(ctx, 0, 1000)
+	for _, ev := range evs {
+		switch ev.ID {
+		case old.ID:
+			if !strings.HasPrefix(ev.Message, `Release search failed while searching "black clover": nyaa.si did not answer in time.`) {
+				t.Fatalf("message = %q", ev.Message)
+			}
+			var d map[string]any
+			json.Unmarshal(ev.Data, &d)
+			if det, _ := d["detail"].(string); !strings.HasPrefix(det, `nyaa "black clover": Get`) {
+				t.Fatalf("data = %s", ev.Data)
+			}
+		case keep.ID:
+			if ev.Message != "scan: boom" {
+				t.Fatalf("unknown error reworded: %q", ev.Message)
+			}
 		}
 	}
 }

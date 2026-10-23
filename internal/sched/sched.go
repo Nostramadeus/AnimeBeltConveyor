@@ -139,6 +139,7 @@ func (s *Sched) Brain() Brain { return s.brain }
 // Start launches every loop (each runs once now, then on its interval) and the watcher.
 func (s *Sched) Start() {
 	s.started.Store(true)
+	s.rewordStoredErrors(s.ctx)
 	for _, l := range s.loops() {
 		s.wg.Add(1)
 		go s.runLoop(l)
