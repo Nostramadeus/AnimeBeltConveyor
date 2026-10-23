@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Nostramadeus/AnimeBeltConveyor/internal/events"
+	"github.com/Nostramadeus/AnimeBeltConveyor/internal/store"
 )
 
 // Plain-language errors for the Updates feed. Go network errors read like
@@ -154,6 +155,12 @@ func (s *Sched) rewordStoredErrors(ctx context.Context) {
 	c := s.set.Get()
 	n := 0
 	for _, ev := range evs {
+		if ev.Kind == events.FileMissing {
+			if s.rewordFileGone(ctx, ev) {
+				n++
+			}
+			continue
+		}
 		if ev.Kind != events.Error {
 			continue
 		}
@@ -194,6 +201,28 @@ func (s *Sched) rewordStoredErrors(ctx context.Context) {
 	if n > 0 {
 		slog.Info("reworded stored error events", "rows", n)
 	}
+}
+
+// rewordFileGone rewrites an old "<show> ep N: file gone (<name>)" row to the
+// current wording, which says what happens next. Returns true when it did.
+func (s *Sched) rewordFileGone(ctx context.Context, ev store.Event) bool {
+	i := strings.Index(ev.Message, ": file gone (")
+	if i < 0 || strings.Contains(ev.Message, "file gone from disk") || ev.ShowID == nil || !strings.HasSuffix(ev.Message, ")") {
+		return false
+	}
+	name := ev.Message[i+len(": file gone (") : len(ev.Message)-1]
+	msg := ev.Message[:i] + fileGoneText(ctx, s.st, *ev.ShowID, deref(ev.Episode), name)
+	return s.st.UpdateEvent(ctx, ev.ID, msg, ev.Data) == nil
+}
+
+// fileGoneText is the tail of a file.missing line: "file gone from disk (<name>). <what happens next>."
+// Deleted or moved outside ABC. A finished release is never picked again, so say so.
+func fileGoneText(ctx context.Context, st *store.DB, showID int64, ep int, name string) string {
+	next := "ABC will not download it again by itself; press Add on the episode if you want it back"
+	if e, err := st.GetEpisode(ctx, showID, ep); err == nil && e.WatchedAt != nil {
+		next = "already watched, so nothing is lost"
+	}
+	return ": file gone from disk (" + name + "). " + next + "."
 }
 
 func humanDur(d time.Duration) string {

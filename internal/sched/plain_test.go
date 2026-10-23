@@ -55,7 +55,10 @@ func TestRewordStoredErrors(t *testing.T) {
 	ctx := context.Background()
 	old := &store.Event{Kind: "error", Message: `conveyor: nyaa "black clover": Get "https://nyaa.si/?q=black+clover": dial tcp 1.2.3.4:443: connectex: A connection attempt failed because the connected party did not properly respond after a period of time.`, Data: json.RawMessage(`{"loop":"conveyor"}`)}
 	keep := &store.Event{Kind: "error", Message: `scan: boom`, Data: json.RawMessage(`{"loop":"scan"}`)}
-	for _, ev := range []*store.Event{old, keep} {
+	sh := e.show(t, store.Show{TitleRomaji: "JoJo", ListStatus: "watching"})
+	ep := 5
+	gone := &store.Event{Kind: "file.missing", ShowID: &sh.ID, Episode: &ep, Message: `JoJo ep 5: file gone ([Erai-raws] JoJo - 05 (1080p).mkv)`, Data: json.RawMessage(`{"file_id":1}`)}
+	for _, ev := range []*store.Event{old, keep, gone} {
 		if err := e.db.InsertEvent(ctx, ev); err != nil {
 			t.Fatal(err)
 		}
@@ -73,6 +76,11 @@ func TestRewordStoredErrors(t *testing.T) {
 			json.Unmarshal(ev.Data, &d)
 			if det, _ := d["detail"].(string); !strings.HasPrefix(det, `nyaa "black clover": Get`) {
 				t.Fatalf("data = %s", ev.Data)
+			}
+		case gone.ID:
+			want := `JoJo ep 5: file gone from disk ([Erai-raws] JoJo - 05 (1080p).mkv). ABC will not download it again by itself; press Add on the episode if you want it back.`
+			if ev.Message != want {
+				t.Fatalf("file gone = %q", ev.Message)
 			}
 		case keep.ID:
 			if ev.Message != "scan: boom" {
