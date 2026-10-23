@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/Nostramadeus/AnimeBeltConveyor/internal/match"
 	"github.com/Nostramadeus/AnimeBeltConveyor/internal/settings"
 	"github.com/Nostramadeus/AnimeBeltConveyor/internal/store"
 )
@@ -103,21 +104,40 @@ func Titles(shows []store.Show, known map[int64]int) []ShowTitles {
 	return out
 }
 
-// NyaaQuery is the search query for a show: the override, else romaji with punctuation stripped.
+// NyaaQuery is the search query for a show: the override, else the base title
+// (season markers stripped, so "Black Clover 2nd Season" searches "black clover"
+// and finds releases numbered either way) cut to its first 8 words. nyaa.si
+// needs every word to appear, so a 30-word light-novel title found nothing
+// (2026-10-23) and a "2nd Season" suffix missed groups that number absolutely.
+// The matcher sorts out what the broader result list contains.
 func NyaaQuery(s store.Show) string {
 	if q := strings.TrimSpace(s.SearchQuery); q != "" {
 		return q
 	}
-	var b strings.Builder
-	for _, r := range s.TitleRomaji {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune(' ')
-		}
+	q := match.BaseTitle(s.TitleRomaji)
+	if q == "" {
+		q = match.BaseTitle(s.TitleEnglish)
 	}
-	return strings.Join(strings.Fields(b.String()), " ")
+	if q == "" {
+		var b strings.Builder
+		for _, r := range s.TitleRomaji {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
+				b.WriteRune(r)
+			} else {
+				b.WriteRune(' ')
+			}
+		}
+		q = b.String()
+	}
+	words := strings.Fields(q)
+	if len(words) > NyaaQueryMaxWords {
+		words = words[:NyaaQueryMaxWords]
+	}
+	return strings.Join(words, " ")
 }
+
+// NyaaQueryMaxWords caps the automatic nyaa query.
+const NyaaQueryMaxWords = 8
 
 // ListStatusFrom maps AniList and MAL list statuses to shows.list_status.
 func ListStatusFrom(s string) string {

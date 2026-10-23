@@ -244,7 +244,7 @@ func TestShowsFlow(t *testing.T) {
 		Files    []FileOut       `json:"files"`
 	}](t, b)
 	if code != 200 || len(detail.Episodes) != 4 || detail.Episodes[0].File == nil || detail.Episodes[0].File.Name != filepath.Base(path) ||
-		len(detail.Files) != 1 || detail.Files[0].Name == "" || detail.Show.NyaaQuery != "Sousou no Frieren" {
+		len(detail.Files) != 1 || detail.Files[0].Name == "" || detail.Show.NyaaQuery != "sousou no frieren" {
 		t.Fatalf("detail -> %d %s", code, b)
 	}
 

@@ -847,8 +847,15 @@ func TestPathsAndNames(t *testing.T) {
 	if SavePath(c, sh) != "" {
 		t.Fatal("relative override without a download folder -> qbit default")
 	}
-	if NyaaQuery(store.Show{TitleRomaji: "Kaguya-sama wa Kokurasetai: Ultra Romantic"}) != "Kaguya sama wa Kokurasetai Ultra Romantic" {
-		t.Fatal("NyaaQuery punctuation")
+	for in, want := range map[string]string{
+		"Kaguya-sama wa Kokurasetai: Ultra Romantic":                 "kaguya sama wa kokurasetai ultra romantic",
+		"Black Clover 2nd Season":                                    "black clover",
+		"JoJo no Kimyou na Bouken: Steel Ball Run - 2nd & 3rd STAGE": "jojo no kimyou na bouken steel ball run",
+		`Tsuihou Sareta Cheat Fuyo Majutsushi wa Kimama na Second Life wo Ouka Suru.: Ore wa Buki dake ja Naku, Arayuru Mono ni "Kyouka Point" wo Fuyo Dekiru shi`: "tsuihou sareta cheat fuyo majutsushi wa kimama na",
+	} {
+		if got := NyaaQuery(store.Show{TitleRomaji: in}); got != want {
+			t.Fatalf("NyaaQuery(%q) = %q, want %q", in, got, want)
+		}
 	}
 	if NyaaQuery(store.Show{TitleRomaji: "x", SearchQuery: "custom q"}) != "custom q" {
 		t.Fatal("NyaaQuery override")
