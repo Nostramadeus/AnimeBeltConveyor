@@ -115,7 +115,9 @@
     const dd = dayDiff(ts);
     const t = fTime(ts);
     if (Math.abs(dd) <= 1) return `${cap(F.rel.format(dd, 'day'))} · ${t}`;
-    if (Math.abs(dd) < 7) return `${F.wd.format(toDate(ts))} · ${t}`;
+    // Weekday only for the past week. A future episode gets its date: a past "Tue" and
+    // a coming "Tue" in the same table read as the same day otherwise.
+    if (dd < 0 && dd > -7) return `${F.wd.format(toDate(ts))} · ${t}`;
     return `${F.md.format(toDate(ts))} · ${t}`;
   }
   function fSize(b) {
