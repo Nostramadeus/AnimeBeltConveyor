@@ -257,7 +257,24 @@ func (s *Server) fileAction(w http.ResponseWriter, r *http.Request, fn func(cont
 	}
 }
 
-func (s *Server) openFile(w http.ResponseWriter, r *http.Request) { s.fileAction(w, r, s.sch.OpenFile) }
+func (s *Server) openFile(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(r, "id")
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "bad file id")
+		return
+	}
+	res, err := s.sch.OpenFileAt(r.Context(), id)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "file not found")
+	case errors.Is(err, sched.ErrFileMissing):
+		writeErr(w, http.StatusConflict, "the file is no longer on disk")
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "skipped_sec": res.SkippedSec, "wanted_sec": res.WantedSec, "player": res.Player, "tested": res.Tested})
+	}
+}
 func (s *Server) revealFile(w http.ResponseWriter, r *http.Request) {
 	s.fileAction(w, r, s.sch.RevealFile)
 }

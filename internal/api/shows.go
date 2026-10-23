@@ -274,6 +274,15 @@ func (s *Server) patchShow(w http.ResponseWriter, r *http.Request) {
 				}
 				sh.AutoFrom = &n
 			}
+		case "intro_skip_sec":
+			sh.IntroSkipSec = nil
+			if !isNull(raw) {
+				var n int
+				if err = json.Unmarshal(raw, &n); err == nil && (n < 0 || n > 600) {
+					err = errors.New("must be between 0 and 600 seconds (null = automatic)")
+				}
+				sh.IntroSkipSec = &n
+			}
 		case "score":
 			sh.Score = nil
 			if !isNull(raw) {

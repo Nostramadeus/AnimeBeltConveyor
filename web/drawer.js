@@ -1,4 +1,4 @@
-/* AnimeBeltConveyor web UI: activity drawer (SPEC-v1.2-ui.md 3.5). Opened by Live in the top bar; unread
+/* AnimeBeltConveyor web UI: activity drawer (SPEC-v1.2-ui.md 3.5). Opened by Updates in the top bar; unread
    count since the last open; consecutive events of the same kind for the same show collapse into one line
    with an expand chevron; on screens >= 1800 px it can be pinned open (remembered).
    Loaded before app.js; app.js calls the function below with its internals. Plain JS, no dependencies. */
@@ -113,7 +113,7 @@
     const n = D.open ? 0 : unread();
     const b = $('#live-unread'); const btn = $('#live-btn');
     if (b) { b.textContent = n > 99 ? '99+' : String(n); b.hidden = n === 0; }
-    if (btn) btn.setAttribute('aria-label', `Activity${n ? `, ${n} unread` : ''}. Live updates: ${ABC.liveLabel().toLowerCase()}`);
+    if (btn) btn.setAttribute('aria-label', `Updates${n ? `, ${n} unread` : ''}. Connection: ${ABC.liveLabel().toLowerCase()}`);
   }
   function paintShell() {
     const el = $('#drawer'); const btn = $('#live-btn'); const scrim = $('#drawer-scrim'); const pin = $('#drawer-pin');
@@ -154,7 +154,7 @@
     D.live = state;
     const btn = $('#live-btn'); const t = $('#live-label'); const chip = $('#feed-live');
     if (btn) { btn.classList.toggle('is-live', state === 'live'); btn.classList.toggle('is-down', state === 'down'); }
-    if (t) t.textContent = state === 'live' ? 'Live' : state === 'down' ? 'Offline' : 'Live';
+    if (t) t.textContent = state === 'down' ? 'Offline' : 'Updates';
     if (chip) { chip.textContent = ABC.liveLabel(); chip.className = `chip ${state === 'live' ? 'chip-ok' : state === 'down' ? 'chip-bad' : ''}`; }
     paintBadge();
   }

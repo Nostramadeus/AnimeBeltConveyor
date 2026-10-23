@@ -210,6 +210,10 @@ type Push struct {
 type Open struct {
 	PlayerPath    string `json:"player_path"`     // "" = OS default handler
 	FolderOnStart bool   `json:"folder_on_start"` // open the download folder in the file manager when ABC starts
+	// IntroSkipSec: seconds the Play button skips at the start of a Netflix-sourced
+	// file (name tagged NF / Netflix / NFLX), by launching the player with its
+	// start-position flag. 0 = off. Per show: Show.IntroSkipSec.
+	IntroSkipSec int `json:"intro_skip_sec"`
 }
 
 type UI struct {
@@ -242,6 +246,7 @@ func Defaults() Settings {
 		MinFreeGiB: 5, SizePreference: SizeSmall}
 	s.Watched = Watched{Mode: "fraction", Fraction: 0.5, DefaultRuntimeMin: 24, PollSec: 5,
 		PlayerTitles: []string{"mpv", "VLC media player", "MPC-HC", "MPC-BE", "PotPlayer"}}
+	s.Open.IntroSkipSec = 10
 	s.Titles.Language = "romaji"
 	s.Dubs = Dubs{Enabled: false, ShowInCalendar: true}
 	s.UI.Theme = "glass"
@@ -427,6 +432,9 @@ func (s Settings) Validate() map[string]string {
 	}
 	if s.Conveyor.PollIntervalMin < 1 {
 		e["conveyor.poll_interval_min"] = "must be at least 1"
+	}
+	if s.Open.IntroSkipSec < 0 || s.Open.IntroSkipSec > 600 {
+		e["open.intro_skip_sec"] = "must be between 0 and 600 seconds"
 	}
 	if msg := checkURL(s.Conveyor.NyaaBase); msg != "" {
 		e["conveyor.nyaa_base"] = msg

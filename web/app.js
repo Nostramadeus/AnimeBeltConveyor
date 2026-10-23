@@ -290,6 +290,7 @@
     chevD: '<path d="M5.5 9.5 12 16l6.5-6.5"/>',
     more: '<circle cx="5.5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
     pulse: '<path d="M2.5 12h4l2.5-6.5 4.5 13 2.5-6.5h5.5"/>',
+    bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
     pin: '<path d="M9 3.5h6l-1 6 3.5 3.5h-11L10 9.5z"/><path d="M12 13v7.5"/>',
   };
   const svg = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name] || ''}</svg>`;
@@ -635,6 +636,21 @@
           const er = $('#wt-err'); if (er) er.textContent = '';
         });
         $('#show-head', root).addEventListener('submit', async (e) => {
+          if (e.target.id !== 'ls-form') return;
+          e.preventDefault();
+          const form = e.target; const inp = $('#ls-n', form); const er = $('#ls-err', form); const btn = $('button[type=submit]', form);
+          if (btn.classList.contains('is-busy')) return;
+          const raw = inp.value.trim(); const n = raw === '' ? null : Number(raw);
+          if (n !== null && (!Number.isInteger(n) || n < 0 || n > 600)) { inp.setAttribute('aria-invalid', 'true'); er.textContent = 'Whole number from 0 to 600, or empty for automatic.'; inp.focus(); return; }
+          inp.removeAttribute('aria-invalid'); er.textContent = '';
+          btn.classList.add('is-busy'); btn.setAttribute('aria-busy', 'true');
+          try {
+            await API.patchShow(id, { intro_skip_sec: n });
+            toast(n === null ? 'Skip logos: automatic' : n === 0 ? 'Skip logos: off for this show' : `Skip logos: ${n} s at the start of every episode`, 'ok');
+            scheduleRefresh(0);
+          } catch (err) { toast(err.message, 'bad'); } finally { btn.classList.remove('is-busy'); btn.removeAttribute('aria-busy'); }
+        });
+        $('#show-head', root).addEventListener('submit', async (e) => {
           if (e.target.id !== 'wt-form') return;
           e.preventDefault();
           const form = e.target; const inp = $('#wt-n', form); const er = $('#wt-err', form); const btn = $('button[type=submit]', form);
@@ -776,7 +792,7 @@
           <div class="show-prog">${progBar(s, true)}</div>
           <div class="show-actions">
             ${nextFile ? h`<button class="btn btn-primary" data-act="play" data-file="${nextFile.file.id}" data-show="${s.id}" data-label="episode ${nextFile.number}" id="play-next">${ico('play')}Play episode ${epNum(nextFile.number, nextFile.abs_number)}</button>` : ''}
-            ${watchedThroughForm(d)}
+            ${watchedThroughForm(d)}${logoSkipForm(d)}
             ${missing ? h`<button class="btn" data-act="download-missing" title="${plural(missing, 'aired episode')} without a file or a release">${ico('download')}Download all missing<span class="btn-n">${fNum(missing)}</span></button>` : ''}
             <button class="btn" data-act="open-show-folder" title="Open this show's folder in your file manager">${ico('folder')}Open folder</button>
             ${s.anilist_id ? h`<a class="btn btn-ghost" href="https://anilist.co/anime/${Number(s.anilist_id)}" target="_blank" rel="noopener noreferrer">${ico('external')}AniList</a>` : ''}
@@ -805,6 +821,20 @@
       <input class="input" id="wt-n" type="number" inputmode="numeric" min="1" ${total ? raw(`max="${Number(total) + 50}"`) : ''} step="1" value="${hi || ''}" aria-describedby="wt-err">
       <button class="btn" type="submit" aria-label="Set: mark episodes 1 to the number watched">Set</button>
       <span class="err" id="wt-err" role="alert"></span>
+    </form>`;
+  }
+  /** Header field "Skip logos [N] s Set" (the owner, 2026-10-23): seconds Play skips at the start of every episode of this
+   *  show. Empty = automatic (the global number for files tagged as streaming-service rips, 0 for others). */
+  function logoSkipForm(d) {
+    const s = d.show;
+    const g = (S.settings && S.settings.open && S.settings.open.intro_skip_sec) || 0;
+    const auto = `Automatic: ${g} s for streaming-service rips, 0 for other files`;
+    return h`<form class="wt-form ls-form" id="ls-form" novalidate title="${auto}">
+      <label for="ls-n">Skip logos</label>
+      <input class="input" id="ls-n" type="number" inputmode="numeric" min="0" max="600" step="1" value="${s.intro_skip_sec ?? ''}" placeholder="auto" aria-label="Seconds to skip at the start of every episode; empty = automatic" aria-describedby="ls-err">
+      <span class="muted small">s</span>
+      <button class="btn" type="submit" aria-label="Set: seconds skipped at the start of every episode">Set</button>
+      <span class="err" id="ls-err" role="alert"></span>
     </form>`;
   }
   /** Episodes 1..n are all watched (n = 0 when episode 1 is not). "Up to here" hides on rows up to n. */
@@ -948,7 +978,7 @@
     const g = (S.settings && S.settings.conveyor) || {};
     const root = downloadDirOf(S.settings) || 'download folder';
     const sep = OS_WIN ? '\\' : '/';
-    const overrides = ['search_query', 'group_order', 'resolution', 'folder'].filter((k) => s[k] != null && s[k] !== '' && !(Array.isArray(s[k]) && !s[k].length)).length + (s.episode_offset ? 1 : 0) + (s.auto_download != null ? 1 : 0) + (s.auto_from != null ? 1 : 0);
+    const overrides = ['search_query', 'group_order', 'resolution', 'folder'].filter((k) => s[k] != null && s[k] !== '' && !(Array.isArray(s[k]) && !s[k].length)).length + (s.episode_offset ? 1 : 0) + (s.auto_download != null ? 1 : 0) + (s.auto_from != null ? 1 : 0) + (s.intro_skip_sec != null ? 1 : 0);
     // SPEC-v1.3 1.5: the manual offset is edited as "absolute numbering starts at" (offset + 1); empty = AniList's value
     const absPh = s.abs_offset != null ? String(s.abs_offset + 1) + ' (from AniList)' : 'unknown';
     const go = Array.isArray(s.group_order) ? s.group_order.join(', ') : typeof s.group_order === 'string' ? safeJsonList(s.group_order).join(', ') : '';
@@ -1263,6 +1293,7 @@
     ] },
     { id: 'open', title: 'Playback', desc: 'What the Play button opens.', fields: [
       { path: 'open.player_path', label: 'Player program', type: 'text', span: 2, placeholder: winOr('C:\\Program Files\\mpv\\mpv.exe', '/usr/bin/mpv'), help: 'Empty = the system\'s default app for video files.' },
+      { path: 'open.intro_skip_sec', label: 'Skip company logos at the start (seconds)', type: 'int', min: 0, max: 600, span: 2, help: "Play starts this many seconds in for files tagged as streaming-service rips (the ones that open with a long logo animation). 0 = off. A show page can set its own number for all of its episodes. Works by starting your player with its start-position option: verified with SMPlayer; mpv, mpv.net, VLC, MPC-HC, MPC-BE, PotPlayer, Zoom Player, ffplay, MPlayer, Celluloid and IINA use the option from their docs and are untested. If an episode starts at 0:00 anyway or the player complains, set 0 here and report it on GitHub. Other players open the file from the start." },
     ] },
     { id: 'titles', title: 'Titles', desc: 'How show names are written.', fields: [
       { path: 'titles.language', label: 'Show titles in', type: 'select', options: [['romaji', 'Romaji (Sousou no Frieren)'], ['english', 'English (Frieren: Beyond Journey\'s End)']], help: 'Falls back to romaji when a show has no English title.' },
@@ -1596,11 +1627,14 @@
   // ------------------------------------------------------------------ global actions (data-act)
   const ACTIONS = {
     async retry() { rerender(true); },
-    async 'run-conveyor'() { await API.runConveyor(); toast('Conveyor run started. Results show up under Live.', 'ok'); },
+    async 'run-conveyor'() { await API.runConveyor(); toast('Conveyor run started. Results show up under Updates.', 'ok'); },
     async 'run-scan'() { await API.runScan(); toast('Folder scan started', 'ok'); },
     async play(btn, ds) {
-      await API.openFile(ds.file);
-      toast(`Opening ${ds.label || 'the episode'} in your player`, 'ok');
+      const r = await API.openFile(ds.file);
+      const what = ds.label || 'the episode';
+      if (r && r.skipped_sec > 0) toast(`Opening ${what}, skipping the first ${r.skipped_sec} s${r.tested ? '' : ' (untested with ' + (r.player || 'this player') + ': report it if it starts at 0:00)'}`, 'ok');
+      else if (r && r.wanted_sec > 0) toast(`Opening ${what} from the start: ${r.player ? r.player + ' has' : 'your player has'} no known start option, so the logos cannot be skipped`, 'warn');
+      else toast(`Opening ${what} in your player`, 'ok');
       const s = S.showsById[ds.show]; if (s) touchShow(s);
     },
     async reveal(btn, ds) { await API.revealFile(ds.file); toast('Opened the folder', 'ok'); },
@@ -1943,7 +1977,7 @@
   // ------------------------------------------------------------------ live events (SSE)
   const EVENT_KINDS = ['show.added', 'show.removed', 'airing.updated', 'release.found', 'release.added', 'release.waiting', 'release.skipped', 'download.done', 'download.failed', 'file.found', 'file.missing', 'episode.watched', 'episode.unwatched', 'push.ok', 'push.failed', 'scan.done', 'error'];
   let liveState = 'connecting';
-  const liveLabel = () => ({ live: 'Live', connecting: 'Connecting…', down: 'Offline' }[liveState]);
+  const liveLabel = () => ({ live: 'Connected', connecting: 'Connecting…', down: 'Offline' }[liveState]);
   function setLive(s) {
     liveState = s;
     if (ABC.Drawer) ABC.Drawer.setLive(s);

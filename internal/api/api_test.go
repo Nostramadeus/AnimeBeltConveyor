@@ -422,3 +422,9 @@ func TestSSEStream(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// OpenAt mirrors Open; the API tests only check the response shape.
+func (l *nopLauncher) OpenAt(player, file string, startSec int) (<-chan struct{}, string, bool, error) {
+	done, err := l.Open(player, file)
+	return done, "nop", startSec > 0, err
+}

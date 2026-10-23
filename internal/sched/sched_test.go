@@ -156,13 +156,14 @@ func count(list []string, v string) int {
 }
 
 type fakeLauncher struct {
-	mu     sync.Mutex
-	opened []string
-	reveal []string
-	dirs   []string
-	urls   []string
-	urlErr error
-	done   chan struct{}
+	mu       sync.Mutex
+	opened   []string
+	openedAt []int // start seconds passed to OpenAt, one per call
+	reveal   []string
+	dirs     []string
+	urls     []string
+	urlErr   error
+	done     chan struct{}
 }
 
 func (f *fakeLauncher) OpenDir(dir string) error {

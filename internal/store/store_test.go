@@ -28,7 +28,7 @@ func TestOpenMigrateIdempotent(t *testing.T) {
 	}
 	ctx := context.Background()
 	v, ok, err := d.Meta(ctx, "schema_version")
-	if err != nil || !ok || v != "3" {
+	if err != nil || !ok || v != "4" {
 		t.Fatalf("schema_version = %q %v %v", v, ok, err)
 	}
 	var mode string
@@ -395,8 +395,8 @@ func TestMigrate2AddsAutoColumns(t *testing.T) {
 	}
 	defer d.Close()
 	ctx := context.Background()
-	if v, _, _ := d.Meta(ctx, "schema_version"); v != "3" { // migrate_2 then migrate_3
-		t.Fatalf("schema_version = %q, want 3", v)
+	if v, _, _ := d.Meta(ctx, "schema_version"); v != "4" { // migrate_2, _3, _4
+		t.Fatalf("schema_version = %q, want 4", v)
 	}
 	hasCol := func(table, col string) bool {
 		rows, err := d.SQL().Query(`SELECT name FROM pragma_table_info(?)`, table)
@@ -456,4 +456,34 @@ func TestMigrate2AddsAutoColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	d2.Close()
+}
+
+// migrate_4.sql: shows.intro_skip_sec (NULL = global, 0 = never, N = seconds) round-trips.
+func TestMigrate4IntroSkip(t *testing.T) {
+	ctx := context.Background()
+	d := openTest(t)
+	sh := Show{TitleRomaji: "Steel Ball Run"}
+	if err := d.CreateShow(ctx, &sh); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := d.GetShow(ctx, sh.ID); got.IntroSkipSec != nil {
+		t.Fatalf("new show intro_skip_sec = %v, want nil", *got.IntroSkipSec)
+	}
+	sh.IntroSkipSec = Ptr(0)
+	if err := d.UpdateShowPrefs(ctx, &sh); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := d.GetShow(ctx, sh.ID); got.IntroSkipSec == nil || *got.IntroSkipSec != 0 {
+		t.Fatalf("intro_skip_sec = %v, want 0", got.IntroSkipSec)
+	}
+	sh.IntroSkipSec = Ptr(12)
+	if err := d.UpdateShowPrefs(ctx, &sh); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := d.GetShow(ctx, sh.ID); got.IntroSkipSec == nil || *got.IntroSkipSec != 12 {
+		t.Fatalf("intro_skip_sec = %v, want 12", got.IntroSkipSec)
+	}
+	if v, _, _ := d.Meta(ctx, "schema_version"); v != "4" {
+		t.Fatalf("schema_version = %q, want 4", v)
+	}
 }

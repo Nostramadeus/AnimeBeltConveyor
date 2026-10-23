@@ -275,17 +275,46 @@ var ErrFileMissing = errors.New("file is not on disk")
 // fraction rule counts while it runs even if its window title is not recognised.
 // In on_open mode the episode is marked watched right away.
 func (s *Sched) OpenFile(ctx context.Context, id int64) error {
+	_, err := s.OpenFileAt(ctx, id)
+	return err
+}
+
+// OpenResult says how OpenFileAt launched the file.
+type OpenResult struct {
+	SkippedSec int    `json:"skipped_sec"` // seconds skipped at the start (0 = opened from the beginning)
+	WantedSec  int    `json:"wanted_sec"`  // seconds the rules asked to skip (0 = none); > 0 with SkippedSec 0 = the player has no known start flag
+	Player     string `json:"player"`      // program name used, "" when unknown
+	Tested     bool   `json:"tested"`      // the start flag was verified on a real machine (SMPlayer); false = from the player's docs
+}
+
+// OpenFileAt opens file id in the player, skipping the seconds the rules give
+// (Show.IntroSkipSec, else open.intro_skip_sec for files tagged as
+// streaming-service rips) when the player has a known start flag.
+func (s *Sched) OpenFileAt(ctx context.Context, id int64) (OpenResult, error) {
+	var res OpenResult
 	f, err := s.st.GetFile(ctx, id)
 	if err != nil {
-		return err
+		return res, err
 	}
 	if _, err := os.Stat(f.Path); err != nil {
-		return ErrFileMissing
+		return res, ErrFileMissing
 	}
 	c := s.set.Get()
-	done, err := s.launch.Open(c.Open.PlayerPath, f.Path)
+	var show *store.Show
+	if f.ShowID != nil {
+		if sh, err := s.st.GetShow(ctx, *f.ShowID); err == nil {
+			show = &sh
+		}
+	}
+	res.WantedSec = introSkipFor(c, show, f.Path)
+	done, player, skipped, err := s.launch.OpenAt(c.Open.PlayerPath, f.Path, res.WantedSec)
 	if err != nil {
-		return err
+		return res, err
+	}
+	res.Player = player
+	if skipped {
+		res.SkippedSec = res.WantedSec
+		_, _, res.Tested, _ = StartArgs(player, res.WantedSec)
 	}
 	if done != nil {
 		s.opens.add(f.ID, done)
@@ -293,11 +322,11 @@ func (s *Sched) OpenFile(ctx context.Context, id int64) error {
 	if c.Watched.Mode == "on_open" && f.ShowID != nil && f.Episode != nil {
 		if s.acc.TryMark(f.ID) {
 			if _, err := s.SetWatched(ctx, *f.ShowID, *f.Episode, true, "player"); err != nil {
-				return err
+				return res, err
 			}
 		}
 	}
-	return nil
+	return res, nil
 }
 
 // RevealFile shows the file in the OS file manager (POST /api/files/{id}/reveal).
@@ -317,6 +346,10 @@ type Launcher interface {
 	// Open plays file with playerPath ("" = OS default handler). done is closed
 	// when the launched player exits; nil when the player cannot be tracked.
 	Open(playerPath, file string) (done <-chan struct{}, err error)
+	// OpenAt is Open with a start position (seconds). When ABC knows the
+	// player's start flag (StartArgs) the player gets it and skipped is true;
+	// otherwise the file opens like Open. player = the program name used.
+	OpenAt(playerPath, file string, startSec int) (done <-chan struct{}, player string, skipped bool, err error)
 	// Reveal shows file selected in the OS file manager.
 	Reveal(file string) error
 	// OpenDir opens a folder in the OS file manager.

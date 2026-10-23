@@ -692,7 +692,7 @@
     ['PATCH', /^\/api\/shows\/(\d+)$/, (m, b) => {
       const s = showById(m[1]);
       if (!s) return err(404, 'Show not found');
-      for (const k of ['list_status', 'search_query', 'episode_offset', 'group_order', 'resolution', 'auto_download', 'folder', 'score', 'auto_from']) if (b && k in b) s[k] = b[k];
+      for (const k of ['list_status', 'search_query', 'episode_offset', 'group_order', 'resolution', 'auto_download', 'folder', 'score', 'auto_from', 'intro_skip_sec']) if (b && k in b) s[k] = b[k];
       s.updated_at = now();
       return okb(card(s));
     }],
