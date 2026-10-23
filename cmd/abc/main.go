@@ -117,7 +117,13 @@ func run() error {
 		return err
 	}
 	defer logFile.Close()
-	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, logFile), nil)))
+	// abcw.exe (no console): stderr is not writable there, and io.MultiWriter stops at the
+	// first failing writer, which would silence the log file too. So: file only.
+	var logOut io.Writer = logFile
+	if hasConsole() {
+		logOut = io.MultiWriter(os.Stderr, logFile)
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(logOut, nil)))
 	slog.Info("starting", "version", version, "data", dir, "data_source", source)
 
 	db, err := store.Open(filepath.Join(dir, "abc.db"))
