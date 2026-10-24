@@ -281,10 +281,15 @@ func (s *Sched) OpenFile(ctx context.Context, id int64) error {
 
 // OpenResult says how OpenFileAt launched the file.
 type OpenResult struct {
-	SkippedSec int    `json:"skipped_sec"` // seconds skipped at the start (0 = opened from the beginning)
-	WantedSec  int    `json:"wanted_sec"`  // seconds the rules asked to skip (0 = none); > 0 with SkippedSec 0 = the player has no known start flag
-	Player     string `json:"player"`      // program name used, "" when unknown
-	Tested     bool   `json:"tested"`      // the start flag was verified on a real machine (SMPlayer); false = from the player's docs
+	SkippedSec           int     `json:"skipped_sec"` // seconds skipped at the start (0 = opened from the beginning)
+	WantedSec            int     `json:"wanted_sec"`  // seconds the rules asked to skip (0 = none); > 0 with SkippedSec 0 = the player has no known start flag
+	Player               string  `json:"player"`      // program name used, "" when unknown
+	Tested               bool    `json:"tested"`      // the start flag was verified on a real machine (SMPlayer); false = from the player's docs
+	SubtitleDelaySec     float64 `json:"subtitle_delay_sec"`
+	SubtitleScale        float64 `json:"subtitle_scale"`
+	SubtitlesApplied     bool    `json:"subtitles_applied"`
+	SubtitlesUnsupported bool    `json:"subtitles_unsupported"`
+	SubtitleNote         string  `json:"subtitle_note"`
 }
 
 // OpenFileAt opens file id in the player, skipping the seconds the rules give
@@ -307,7 +312,22 @@ func (s *Sched) OpenFileAt(ctx context.Context, id int64) (OpenResult, error) {
 		}
 	}
 	res.WantedSec = introSkipFor(c, show, f.Path)
-	done, player, skipped, err := s.launch.OpenAt(c.Open.PlayerPath, f.Path, res.WantedSec)
+	options := subtitlesFor(c, show)
+	res.SubtitleDelaySec, res.SubtitleScale = options.Delay, options.Scale
+	var done <-chan struct{}
+	var player string
+	var skipped bool
+	if launcher, ok := s.launch.(interface {
+		OpenPlayback(string, string, int, SubtitleOptions) (<-chan struct{}, string, bool, bool, string, error)
+	}); ok {
+		done, player, skipped, res.SubtitlesApplied, res.SubtitleNote, err = launcher.OpenPlayback(c.Open.PlayerPath, f.Path, res.WantedSec, options)
+	} else {
+		done, player, skipped, err = s.launch.OpenAt(c.Open.PlayerPath, f.Path, res.WantedSec)
+		if options.Requested {
+			res.SubtitleNote = "Subtitle preferences are not supported by this launcher."
+		}
+	}
+	res.SubtitlesUnsupported = options.Requested && !res.SubtitlesApplied
 	if err != nil {
 		return res, err
 	}

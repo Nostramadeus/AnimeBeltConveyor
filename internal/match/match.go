@@ -278,6 +278,11 @@ func seasonSuffix(n string) (string, int) {
 	return n, 0
 }
 
+func SeasonNumber(title string) int {
+	_, season := seasonSuffix(Normalize(title))
+	return season
+}
+
 func atoi(s string) int {
 	n := 0
 	for _, c := range s {

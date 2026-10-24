@@ -106,7 +106,7 @@ Problem: red "Failed" chips stay on an episode forever, including after the user
 - Changing how auto-download decides (section 9 of SPEC-v1.1) beyond the note/status rename in 2.1.
 
 ## 4. Verification (the builder runs all of it and reports results, not claims)
-1. `gofmt -l .` empty; `go vet ./...`; `go test -count=1 ./...` all packages green (set `GOPATH=F:\DevTools\gopath GOCACHE=F:\DevTools\gocache`, Go binary `F:\DevTools\go\bin\go.exe`; `-timeout 120s`).
+1. `gofmt -l .` empty; `go vet ./...`; `go test -count=1 ./...` all packages green (set `GOPATH=%USERPROFILE%\go GOCACHE=%LOCALAPPDATA%\go-build`, Go binary `go`; `-timeout 120s`).
 2. Migration dry run: copy `.dev-data\abc.db` to the scratch folder, open it with the new binary (`--data <scratch copy dir> --no-browser --port 7702`), confirm `schema_version = 3`, `abs_offset` column present, no failed+removed rows left. Never touch `%APPDATA%\abc` or the live `.dev-data`.
 3. Live run on port 7702 against that scratch copy (headless, no browser window, muted): `GET /api/shows/{id}` shows `abs_offset`; PATCH `episode_offset` round-trips; `POST .../releases/clear-failed` returns a count and the row disappears from the episode's current release; cross-origin POST still 403.
 4. Mock-mode click-through in a headless browser (the repo's existing way, see web/mock.js and the v1.2 builder's notes in AI-HANDOFF.md): the `#` cell shows two numbers on the sequel show; hero/card/chip texts read "Episode 3 (27)" style; "Absolute numbering starts at" saves empty and 171 and shows the right placeholder; Clear failed releases and the per-episode Clear both work and toast; the old failed release is hidden, the fresh one shown. Zero console errors.

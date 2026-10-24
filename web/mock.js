@@ -44,15 +44,16 @@
     downloader: { mode: 'manual', torrent_dir: '' },
     qbit: { url: 'http://127.0.0.1:8080', username: '', password: '', category: 'abc', save_path_style: 'show_folder' },
     conveyor: { enabled: true, poll_interval_min: 15, nyaa_base: 'https://nyaa.si', nyaa_category: '1_2', group_order: ['SubsPlease', 'Erai-raws'], resolution: '1080p', fallback_hours: 12, skip_batches_while_airing: true, auto_replace_v2: true, min_seeders: 1, lookback_days: 14, max_release_gib: 4, min_free_gib: 5, size_preference: 'small' },
-    watched: { mode: 'fraction', fraction: 0.5, default_runtime_min: 24, poll_sec: 5, player_titles: ['mpv', 'VLC media player', 'MPC-HC', 'MPC-BE', 'PotPlayer'] },
+    watched: { mode: 'fraction', fraction: 0.5, default_runtime_min: 24, poll_sec: 5, player_titles: ['mpv', 'VLC media player', 'MPC-HC', 'MPC-BE', 'PotPlayer', 'SMPlayer'] },
     titles: { language: 'romaji' },
     dubs: { enabled: false, show_in_calendar: true, token: '' },
     push: { anilist: false, mal: false, anilist_client_id: '', anilist_client_secret: '', mal_client_id: '' },
-    open: { player_path: '', folder_on_start: false },
+    open: { player_path: '', folder_on_start: false, intro_skip_sec: 10, subtitle_delay_sec: 0, subtitle_scale: 1 },
     ui: { theme: 'glass', accent: '', reduced_motion: false, setup_done: false },
     notify: { toast: false },
   };
   const settings = clone(DEFAULTS);
+	const deletePreviews = new Map();
   settings.ui.setup_done = !SETUP;
   if (!FRESH) {
     // Populated demo: D:\Anime is the download folder, Videos is scanned too, an old drive is a past folder,
@@ -332,7 +333,7 @@
   function showDetail(s) {
     const c = card(s);
     return {
-      show: { ...c, mal_id: s.mal_id, title_native: s.title_native, synonyms: s.synonyms, season: s.season, season_year: s.season_year, duration_min: s.duration_min, search_query: s.search_query, episode_offset: s.episode_offset, group_order: s.group_order, resolution: s.resolution, auto_download: s.auto_download, folder: s.folder, auto_from: s.auto_from, abs_offset: s.abs_offset, added_at: s.added_at, updated_at: s.updated_at },
+      show: { ...c, mal_id: s.mal_id, title_native: s.title_native, synonyms: s.synonyms, season: s.season, season_year: s.season_year, duration_min: s.duration_min, search_query: s.search_query, episode_offset: s.episode_offset, group_order: s.group_order, resolution: s.resolution, auto_download: s.auto_download, folder: s.folder, auto_from: s.auto_from, abs_offset: s.abs_offset, intro_skip_sec: s.intro_skip_sec, subtitle_delay_sec: s.subtitle_delay_sec ?? null, subtitle_scale: s.subtitle_scale ?? null, added_at: s.added_at, updated_at: s.updated_at },
       episodes: (episodes[s.id] || []).map((e) => epRow(s, e)),
       releases: releases.filter((r) => r.show_id === s.id),
       files: files.filter((f) => f.show_id === s.id),
@@ -692,7 +693,7 @@
     ['PATCH', /^\/api\/shows\/(\d+)$/, (m, b) => {
       const s = showById(m[1]);
       if (!s) return err(404, 'Show not found');
-      for (const k of ['list_status', 'search_query', 'episode_offset', 'group_order', 'resolution', 'auto_download', 'folder', 'score', 'auto_from', 'intro_skip_sec']) if (b && k in b) s[k] = b[k];
+      for (const k of ['list_status', 'search_query', 'episode_offset', 'group_order', 'resolution', 'auto_download', 'folder', 'score', 'auto_from', 'intro_skip_sec', 'subtitle_delay_sec', 'subtitle_scale']) if (b && k in b) s[k] = b[k];
       s.updated_at = now();
       return okb(card(s));
     }],
@@ -769,6 +770,34 @@
       if (!(v === null || v === 0 || v === 1)) return err(400, 'auto must be null, 0 or 1');
       e.auto = v;
       return okb(epRow(s, e));
+    }],
+    ['POST', /^\/api\/shows\/(\d+)\/episodes\/(\d+)\/check$/, (m, b) => {
+      const show = showById(m[1]); const number = Number(m[2]);
+      if (!show || !(episodes[show.id] || []).some((episode) => episode.number === number)) return err(404, 'Episode not found');
+      const found = releases.filter((release) => release.show_id === show.id && release.episode === number);
+      let outcome = found.length ? 'found' : 'not_found'; let explanation = found.length ? 'Releases found. Nothing was downloaded by this search.' : 'No matching release found for this episode.';
+      if (b.download && files.some((file) => file.show_id === show.id && file.episode === number && file.present !== false)) { outcome = 'already_on_disk'; explanation = 'This episode is already on disk.'; }
+      else if (b.download && found.some((release) => ['added', 'downloading'].includes(release.status))) { outcome = 'already_downloading'; explanation = 'A release already covers this episode.'; }
+      else if (b.download && found.length) { handOff(found[0]); outcome = 'added'; explanation = 'Release handed to the configured downloader.'; }
+      return okb({ releases: found, outcome, explanation });
+    }],
+    ['GET', /^\/api\/shows\/(\d+)\/episodes\/(\d+)\/delete$/, (m) => {
+      const show = showById(m[1]); const number = Number(m[2]);
+      if (!show) return err(404, 'Show not found');
+      const targets = files.filter((file) => file.show_id === show.id && file.episode === number && file.present !== false);
+      const torrents = releases.filter((release) => release.show_id === show.id && release.episode === number && ['added', 'downloading'].includes(release.status)).map((release) => ({ hash: release.info_hash, name: release.title }));
+      const allowed = targets.length + torrents.length > 0;
+      const token = allowed ? `preview-${show.id}-${number}-${now()}` : '';
+      if (allowed) deletePreviews.set(token, { show: show.id, number });
+      return okb({ allowed, reason: allowed ? '' : 'No verified episode files or managed torrents to delete.', token, files: targets.map((file) => ({ path: file.path, size: file.size })), torrents });
+    }],
+    ['POST', /^\/api\/shows\/(\d+)\/episodes\/(\d+)\/delete$/, (m, b) => {
+      const preview = deletePreviews.get(b?.token); deletePreviews.delete(b?.token);
+      if (!preview || preview.show !== Number(m[1]) || preview.number !== Number(m[2])) return err(409, 'Request a new delete preview.');
+      const deleted = []; for (const file of files) if (file.show_id === preview.show && file.episode === preview.number && file.present !== false) { file.present = false; deleted.push(file.path); }
+      const episode = episodes[preview.show].find((entry) => entry.number === preview.number); episode.auto = 0;
+      for (const release of releases) if (release.show_id === preview.show && release.episode === preview.number) { release.status = 'skipped'; release.status_note = 'deleted by user'; }
+      return okb({ deleted_files: deleted, removed_torrents: [], remaining: [], explanation: 'Deleted. Watched history stays; automatic download is off for this episode.' });
     }],
     ['GET', /^\/api\/shows\/(\d+)\/download-missing$/, (m) => {
       const s = showById(m[1]);

@@ -58,8 +58,10 @@ type Sched struct {
 	watcher    *scan.Watcher
 	watchRoots []string // library roots that existed when the watcher started
 
-	addMu  sync.Mutex // serialises release adds
-	bulkMu sync.Mutex // serialises Download all missing (SPEC v1.1 section 9)
+	addMu       sync.Mutex // serialises release adds
+	bulkMu      sync.Mutex // serialises Download all missing (SPEC v1.1 section 9)
+	deleteMu    sync.Mutex
+	deletePlans map[string]*episodeDeletePlan
 
 	noteMu  sync.Mutex
 	noted   map[string]string // "show:ep" -> last waiting/skipped reason logged

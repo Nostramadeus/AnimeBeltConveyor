@@ -66,10 +66,14 @@ func (s *Sched) conveyorRun(ctx context.Context, only int64) error {
 // storeCandidates parses + matches RSS items and upserts them as candidates.
 // Returns the number of new rows per show.
 func (s *Sched) storeCandidates(ctx context.Context, c settings.Settings, items []NyaaItem, titles []ShowTitles, byID map[int64]store.Show) map[int64]int {
+	return s.storeCandidatesWithCutoff(ctx, c, items, titles, byID, true)
+}
+
+func (s *Sched) storeCandidatesWithCutoff(ctx context.Context, c settings.Settings, items []NyaaItem, titles []ShowTitles, byID map[int64]store.Show, applyCutoff bool) map[int64]int {
 	cutoff := s.now().Add(-time.Duration(c.Conveyor.LookbackDays) * 24 * time.Hour)
 	out := map[int64]int{}
 	for _, it := range items {
-		if !it.PublishedAt.IsZero() && it.PublishedAt.Before(cutoff) {
+		if applyCutoff && !it.PublishedAt.IsZero() && it.PublishedAt.Before(cutoff) {
 			continue
 		}
 		r := s.brain.Parse(it.Title)
@@ -519,6 +523,30 @@ func joinNote(note, part string) string {
 func (s *Sched) addRelease(ctx context.Context, c settings.Settings, sh store.Show, rel store.Release, replaces *store.File) (store.Release, error) {
 	s.addMu.Lock()
 	defer s.addMu.Unlock()
+	return s.addReleaseLocked(ctx, c, sh, rel, replaces, false)
+}
+
+func (s *Sched) addReleaseLocked(ctx context.Context, c settings.Settings, sh store.Show, rel store.Release, replaces *store.File, explicit bool) (store.Release, error) {
+	if !explicit && rel.IsBatch {
+		episodes, err := s.st.ListEpisodes(ctx, sh.ID)
+		if err != nil {
+			return rel, err
+		}
+		for _, episode := range episodes {
+			if rel.Covers(episode.Number) && episode.Auto != nil && *episode.Auto == 0 {
+				return rel, nil
+			}
+		}
+	}
+	if !explicit && rel.Episode != nil {
+		episode, err := s.st.GetEpisode(ctx, sh.ID, *rel.Episode)
+		if err != nil {
+			return rel, err
+		}
+		if allowed, _ := autoAllowed(episode, sh, s.now(), c); !allowed && (replaces == nil || episode.Auto != nil && *episode.Auto == 0) {
+			return rel, nil
+		}
+	}
 	cur, err := s.st.GetRelease(ctx, rel.ID)
 	if err != nil {
 		return rel, err
@@ -678,6 +706,8 @@ func groupRes(r store.Release) string {
 
 // ForceAdd adds a candidate to qBittorrent now (POST /api/releases/{id}/add).
 func (s *Sched) ForceAdd(ctx context.Context, id int64) (store.Release, error) {
+	s.addMu.Lock()
+	defer s.addMu.Unlock()
 	rel, err := s.st.GetRelease(ctx, id)
 	if err != nil {
 		return rel, err
@@ -695,7 +725,7 @@ func (s *Sched) ForceAdd(ctx context.Context, id int64) (store.Release, error) {
 			return rel, err
 		}
 	}
-	return s.addRelease(ctx, s.set.Get(), sh, rel, nil)
+	return s.addReleaseLocked(ctx, s.set.Get(), sh, rel, nil, true)
 }
 
 // Skip marks a release skipped (POST /api/releases/{id}/skip).

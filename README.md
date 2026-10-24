@@ -23,6 +23,20 @@
 
 One Go binary, one SQLite file, a web UI at `http://127.0.0.1:7700`. No account, no cloud, no telemetry. It talks only to AniList, nyaa.si and your torrent app.
 
+## Episode controls
+
+- **Check Nyaa** searches for one episode and opens its release results. It does not start a download.
+- **Check & download** searches and picks that episode using your group, resolution, size, seeder and disk-space rules. It works with paused shows and episodes whose automatic download is off.
+- **Delete** previews exact files and linked torrents. Watched history stays; automatic download turns off for that episode. Episode deletion is currently Windows-only. Shared, batch and multi-file torrents must be managed in qBittorrent.
+
+## Manual downloads and playback
+
+Download episodes with your normal torrent client, then put them inside an **active Library folder**. Keep the show tracked in ABC. The scanner matches the video filename, or a numbered filename inside the show's folder, within that folder's scan depth. Use **Scan files** to check immediately. Files in inactive folders or beyond the configured depth are not scanned.
+
+Settings › Playback has **Subtitle delay (seconds)** and **Subtitle size (×)**. Defaults are 0 seconds and 1×. Positive delay shows subtitles later; negative shows them earlier. A show's Rules panel can override either value; blank inherits the global value. Text and ASS subtitles support scaling in mpv, mpv.net, Celluloid, IINA and SMPlayer with an mpv backend. Burned-in subtitles cannot be resized. Other players report unsupported adjustments.
+
+SMPlayer opens a separate playback profile. Changes made inside it do not update your normal SMPlayer settings. Existing logo skipping still applies. ABC tracks the launched player process even with no logo skip. Automatic watched detection counts elapsed detected-player time, including paused time; it does not read the playback/seek position. Manual and “as soon as it opens” modes stay available.
+
 ## Screens
 
 | Show page | Setup guide |

@@ -283,6 +283,24 @@ func (s *Server) patchShow(w http.ResponseWriter, r *http.Request) {
 				}
 				sh.IntroSkipSec = &n
 			}
+		case "subtitle_delay_sec", "subtitle_scale":
+			var value *float64
+			if !isNull(raw) {
+				var number float64
+				err = json.Unmarshal(raw, &number)
+				if err == nil && k == "subtitle_delay_sec" && !(number >= -60 && number <= 60) {
+					err = errors.New("must be between -60 and 60 seconds (null = global)")
+				}
+				if err == nil && k == "subtitle_scale" && !(number >= 0.1 && number <= 3) {
+					err = errors.New("must be between 0.1 and 3 (null = global)")
+				}
+				value = &number
+			}
+			if k == "subtitle_delay_sec" {
+				sh.SubtitleDelaySec = value
+			} else {
+				sh.SubtitleScale = value
+			}
 		case "score":
 			sh.Score = nil
 			if !isNull(raw) {

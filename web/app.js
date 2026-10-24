@@ -193,6 +193,9 @@
     patchShow: (id, patch) => api('PATCH', `/shows/${id}`, patch),
     deleteShow: (id, deleteFiles) => api('DELETE', `/shows/${id}?delete_files=${deleteFiles ? 1 : 0}`),
     setWatched: (id, n, watched) => api('POST', `/shows/${id}/episodes/${n}/watched`, { watched }),
+    checkEpisode: (id, n, download) => api('POST', `/shows/${id}/episodes/${n}/check`, { download }),
+    episodeDeletePreview: (id, n) => api('GET', `/shows/${id}/episodes/${n}/delete`),
+    deleteEpisode: (id, n, token) => api('POST', `/shows/${id}/episodes/${n}/delete`, { token }),
     refreshShow: (id) => api('POST', `/shows/${id}/refresh`),
     search: (text) => api('GET', '/search' + q({ q: text })),
     season: (season, year) => api('GET', '/season' + q({ season, year })),
@@ -398,7 +401,7 @@
     setTimeout(() => el.remove(), ms || (tone === 'bad' ? 7000 : 4200));
   }
   /** Native <dialog> confirm. Resolves {ok, dialog} so callers can read extra inputs placed in `body`. */
-  function confirmBox({ title, body, ok = 'OK', danger = true }) {
+  function confirmBox({ title, body, ok = 'OK', danger = true, blocked = false }) {
     const dlg = $('#confirm');
     if (!dlg || typeof dlg.showModal !== 'function') {
       return Promise.resolve({ ok: window.confirm(title), dialog: null });
@@ -408,6 +411,7 @@
     const okBtn = $('#confirm-ok', dlg);
     okBtn.textContent = ok;
     okBtn.className = `btn ${danger ? 'btn-danger' : 'btn-primary'}`;
+    okBtn.hidden = blocked;
     dlg.returnValue = '';
     dlg.showModal();
     return new Promise((res) => dlg.addEventListener('close', () => res({ ok: dlg.returnValue === 'ok', dialog: dlg }), { once: true }));
@@ -563,7 +567,7 @@
   // ---------- Show  #/show/{id}
   Views.show = (m) => {
     const id = Number(m[1]);
-    const st = { showAll: false, detail: null, preview: null, openPicks: new Set() };
+    const st = { showAll: false, detail: null, preview: null, openPicks: new Set(), busyEpisodes: new Set(), releaseEpisode: null, releaseFeedback: '' };
     const dynHead = () => showHead(st.detail, st.preview);
     const dynBody = () => showBody(st.detail, st);
     const reload = () => rerender(); // keeps the scroll position
@@ -668,6 +672,39 @@
         });
       },
       actions: {
+        'all-releases': () => { st.releaseEpisode = null; st.releaseFeedback = ''; $('#show-body').innerHTML = String(dynBody()); hydrate($('#show-body')); },
+        'check-episode': async (btn, ds) => {
+          const number = Number(ds.ep);
+          if (st.busyEpisodes.has(number)) return;
+          st.busyEpisodes.add(number);
+          for (const control of $$(`#ep-${number} .episode-control`)) control.disabled = true;
+          try {
+            const result = await API.checkEpisode(id, number, ds.download === '1');
+            st.releaseEpisode = number; st.releaseFeedback = result.explanation;
+            toast(result.explanation, result.outcome === 'not_found' ? 'info' : 'ok');
+            await reload();
+            const panel = $('#episode-releases'); panel?.scrollIntoView({ block: 'nearest' }); panel?.focus({ preventScroll: true });
+          } catch (error) { st.releaseEpisode = number; st.releaseFeedback = error.message; await reload(); throw error; }
+          finally { st.busyEpisodes.delete(number); for (const control of $$(`#ep-${number} .episode-control`)) control.disabled = false; }
+        },
+        'delete-episode': async (btn, ds) => {
+          const number = Number(ds.ep);
+          if (st.busyEpisodes.has(number)) return;
+          st.busyEpisodes.add(number);
+          for (const control of $$(`#ep-${number} .episode-control`)) control.disabled = true;
+          try {
+            const preview = await API.episodeDeletePreview(id, number);
+            const { ok } = await confirmBox({ title: `Delete episode ${number}?`, blocked: !preview.allowed,
+              body: h`${preview.reason ? h`<p role="alert">${preview.reason}</p>` : ''}${preview.torrents.length ? h`<h3>Torrents</h3><ul>${preview.torrents.map((torrent) => h`<li>${torrent.name}</li>`)}</ul>` : ''}${preview.files.length ? h`<h3>Files</h3><ul class="delete-files">${preview.files.map((file) => h`<li><span class="mono">${file.path}</span> · ${fSize(file.size)}</li>`)}</ul>` : ''}<p>Watched history stays. Automatic download turns off for this episode.</p>`,
+              ok: preview.torrents.length ? 'Delete torrent & files' : 'Delete files' });
+            if (!ok || !preview.allowed) return;
+            const result = await API.deleteEpisode(id, number, preview.token);
+            if (result.remaining.length) {
+              await confirmBox({ title: `Episode ${number}: remaining work`, blocked: true, body: h`<p>${result.explanation}</p><ul class="delete-files">${result.remaining.map((item) => h`<li>${item}</li>`)}</ul>` });
+            } else toast(result.explanation, 'ok');
+            await reload();
+          } finally { st.busyEpisodes.delete(number); for (const control of $$(`#ep-${number} .episode-control`)) control.disabled = false; }
+        },
         'show-all': (btn) => { st.showAll = true; $('#show-body').innerHTML = String(dynBody()); hydrate($('#show-body')); },
         'refresh-show': async () => { await API.refreshShow(id); toast('Refreshing from AniList and searching nyaa.si', 'ok'); },
         // 409 ("no episode downloaded yet…", "no download folder set") lands in the global error toast.
@@ -892,6 +929,7 @@
     const s = d.show;
     const eps = (d.episodes || []).slice().sort((a, b) => a.number - b.number);
     const rels = d.releases || [];
+    const panelReleases = st.releaseEpisode == null ? rels : rels.filter((release) => release.episode === st.releaseEpisode || release.is_batch && (release.episode == null || release.episode <= st.releaseEpisode && (release.episode_end ?? release.episode) >= st.releaseEpisode));
     const relById = Object.fromEntries(rels.map((r) => [r.id, r]));
     const now = nowSec();
     const nextIdx = eps.findIndex((e) => !e.watched_at && (e.file || (e.aired_at && e.aired_at <= now)));
@@ -936,6 +974,7 @@
         <td class="c-rel ${relText || cands.length ? '' : 'is-empty'}"><div class="rel-line">${relText ? h`<span class="ellipsis ${f ? 'mono' : ''}" title="${relTip}">${relText}</span>` : h`<span class="dim">—</span>`}
           ${cands.length ? h`<button type="button" class="btn btn-sm btn-ghost pick-toggle" data-pick-toggle="${n}" aria-expanded="${String(open)}" aria-controls="pick-row-${n}">Pick release<span class="pick-n">${fNum(cands.length)}</span>${ico('chevD')}</button>` : ''}</div></td>
         <td class="c-act"><div class="acts">
+          <span class="episode-controls"><button class="btn btn-sm btn-ghost episode-control" data-act="check-episode" data-ep="${n}" data-download="0" ${st.busyEpisodes.has(n) ? raw('disabled') : ''} title="Search Nyaa for this episode and show releases. Nothing is downloaded by this action." aria-label="Check Nyaa for episode ${n}">Check Nyaa</button><button class="btn btn-sm btn-ghost episode-control" data-act="check-episode" data-ep="${n}" data-download="1" ${st.busyEpisodes.has(n) ? raw('disabled') : ''} title="Search Nyaa for this episode and download the best matching release using your rules." aria-label="Check and download episode ${n}">Check &amp; download</button><button class="btn btn-sm btn-ghost episode-control" data-act="delete-episode" data-ep="${n}" ${st.busyEpisodes.has(n) ? raw('disabled') : ''} title="Preview this episode's torrent and files before deleting them." aria-label="Delete episode ${n}">Delete</button></span>
           ${f ? h`<button class="btn btn-sm ${e.watched_at ? '' : 'btn-primary'}" data-act="play" data-file="${f.id}" data-show="${s.id}" data-label="episode ${n}" aria-label="Play episode ${n}">${ico('play')}Play</button>` : ''}
           ${magnet ? h`<button class="btn btn-sm" data-act="copy-magnet" data-magnet="${magnet}" data-tip="Copy the magnet link, then paste it into your torrent app" aria-label="Copy the magnet link for episode ${n}">${ico('copy')}Magnet</button>` : ''}
           ${aired || f || e.watched_at ? h`<span class="acts-pair">${n > prefix ? upToHere(n) : ''}<button class="btn btn-sm btn-icon btn-watch ${e.watched_at ? 'is-on' : ''}" data-act="watched" data-show="${s.id}" data-ep="${n}" data-val="${e.watched_at ? 0 : 1}" aria-pressed="${e.watched_at ? 'true' : 'false'}" data-tip="${e.watched_at ? 'Watched (click to undo)' : 'Mark watched'}" aria-label="Watched: episode ${n}">${ico('check')}</button></span>` : ''}
@@ -966,11 +1005,12 @@
           <div class="acts"><button class="btn btn-sm btn-icon" data-act="play" data-file="${f.id}" data-show="${s.id}" data-label="episode ${f.episode}" aria-label="Play episode ${f.episode}" data-tip="Play">${ico('play')}</button><button class="btn btn-sm btn-icon" data-act="reveal" data-file="${f.id}" aria-label="Show in folder" data-tip="Show in folder">${ico('folder')}</button></div></li>`)}</ul>`
           : h`<p class="muted small">No files matched yet. Files appear when the scanner finds them in one of your library folders.</p>`}
       </section>
-      <section class="surface panel">
-        <div class="panel-head"><h2>Releases<span class="count">${rels.length || ''}</span></h2></div>
-        ${rels.length ? h`<ul class="list-rows">${rels.slice().sort((a, b) => (b.published_at || 0) - (a.published_at || 0)).slice(0, 30).map((r) => h`<li><div class="main"><span class="ellipsis" title="${r.title}">${r.title}</span><span class="sub dim">${r.is_batch ? 'Batch' : 'Ep ' + (r.episode ?? '?')} · ${fNum(r.seeders ?? 0)} seeders${r.size_bytes ? ' · ' + fSize(r.size_bytes) : ''} · ${fRel(r.published_at)}${r.status_note ? ' · ' + r.status_note : ''}</span></div>
+      <section class="surface panel" id="episode-releases" tabindex="-1">
+        <div class="panel-head"><h2>Releases${st.releaseEpisode != null ? h` · Episode ${st.releaseEpisode}` : ''}<span class="count">${panelReleases.length || ''}</span></h2>${st.releaseEpisode != null ? h`<button class="btn btn-sm btn-ghost" data-act="all-releases">Show all releases</button>` : ''}</div>
+        ${st.releaseFeedback ? h`<p class="small" role="status">${st.releaseFeedback}</p>` : ''}
+        ${panelReleases.length ? h`<ul class="list-rows">${panelReleases.slice().sort((a, b) => (b.published_at || 0) - (a.published_at || 0)).slice(0, 30).map((r) => h`<li><div class="main"><span class="ellipsis" title="${r.title}">${r.title}</span><span class="sub dim">${r.is_batch ? 'Batch' : 'Ep ' + (r.episode ?? '?')} · ${fNum(r.seeders ?? 0)} seeders${r.size_bytes ? ' · ' + fSize(r.size_bytes) : ''} · ${fRel(r.published_at)}${r.status_note ? ' · ' + r.status_note : ''}</span></div>
           <span class="chip ${r.status === 'done' ? 'chip-ok' : ['added', 'downloading', 'chosen'].includes(r.status) ? 'chip-warn' : r.status === 'failed' ? 'chip-bad' : ''}">${pretty(r.status)}</span></li>`)}</ul>`
-          : h`<p class="muted small">No nyaa.si results yet. The conveyor searches every ${S.settings && S.settings.conveyor ? S.settings.conveyor.poll_interval_min : 15} minutes while the show is on your Watching list.</p>`}
+          : h`<p class="muted small">${st.releaseEpisode != null ? 'No releases found for this episode.' : 'No nyaa.si results yet. Use Check Nyaa beside an episode to search now.'}</p>`}
       </section>
     </div>`;
   }
@@ -978,7 +1018,7 @@
     const g = (S.settings && S.settings.conveyor) || {};
     const root = downloadDirOf(S.settings) || 'download folder';
     const sep = OS_WIN ? '\\' : '/';
-    const overrides = ['search_query', 'group_order', 'resolution', 'folder'].filter((k) => s[k] != null && s[k] !== '' && !(Array.isArray(s[k]) && !s[k].length)).length + (s.episode_offset ? 1 : 0) + (s.auto_download != null ? 1 : 0) + (s.auto_from != null ? 1 : 0) + (s.intro_skip_sec != null ? 1 : 0);
+    const overrides = ['search_query', 'group_order', 'resolution', 'folder'].filter((k) => s[k] != null && s[k] !== '' && !(Array.isArray(s[k]) && !s[k].length)).length + (s.episode_offset ? 1 : 0) + (s.auto_download != null ? 1 : 0) + (s.auto_from != null ? 1 : 0) + (s.intro_skip_sec != null ? 1 : 0) + (s.subtitle_delay_sec != null ? 1 : 0) + (s.subtitle_scale != null ? 1 : 0);
     // SPEC-v1.3 1.5: the manual offset is edited as "absolute numbering starts at" (offset + 1); empty = AniList's value
     const absPh = s.abs_offset != null ? String(s.abs_offset + 1) + ' (from AniList)' : 'unknown';
     const go = Array.isArray(s.group_order) ? s.group_order.join(', ') : typeof s.group_order === 'string' ? safeJsonList(s.group_order).join(', ') : '';
@@ -1000,10 +1040,34 @@
         </div>
         <div class="form-actions"><span class="small muted" id="ss-msg" aria-live="polite" style="margin-right:auto"></span><button class="btn" type="reset">Reset</button><button class="btn btn-primary" type="submit">Save rules</button></div>
       </form>
+      <form id="subtitle-form" class="subtitle-form" novalidate>
+        <h3>Subtitles for this show</h3><div class="form-grid">
+          <div class="field"><label for="ss-sub-delay">Subtitle delay (seconds)</label><input class="input" id="ss-sub-delay" name="subtitle_delay_sec" type="number" min="-60" max="60" step="0.1" value="${s.subtitle_delay_sec ?? ''}" placeholder="Global (${S.settings?.open?.subtitle_delay_sec ?? 0})"><p class="help">Blank = global (${S.settings?.open?.subtitle_delay_sec ?? 0} seconds). Positive = subtitles appear later. Negative = earlier.</p></div>
+          <div class="field"><label for="ss-sub-scale">Subtitle size (×)</label><input class="input" id="ss-sub-scale" name="subtitle_scale" type="number" min="0.1" max="3" step="0.1" value="${s.subtitle_scale ?? ''}" placeholder="Global (${S.settings?.open?.subtitle_scale ?? 1})"><p class="help">Blank = global (${S.settings?.open?.subtitle_scale ?? 1}×). 1 = normal size; 0.6 = 60%.</p></div>
+        </div><p class="err" id="ss-sub-error" role="alert"></p><div class="form-actions"><button class="btn" type="button" id="ss-sub-reset">Reset to global</button><button class="btn btn-primary" type="submit">Set subtitles</button></div>
+      </form>
     </details>`;
   }
   function safeJsonList(s) { try { const v = JSON.parse(s); return Array.isArray(v) ? v : []; } catch { return []; } }
   function bindShowSettings(root, show, id) {
+    const subtitles = $('#subtitle-form', root);
+    if (subtitles) {
+      $('#ss-sub-reset', subtitles).addEventListener('click', () => { subtitles.elements.subtitle_delay_sec.value = ''; subtitles.elements.subtitle_scale.value = ''; subtitles.requestSubmit(); });
+      subtitles.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const patch = {}; const error = $('#ss-sub-error', subtitles);
+        for (const key of ['subtitle_delay_sec', 'subtitle_scale']) {
+          const control = subtitles.elements[key]; const value = control.value.trim() === '' ? null : Number(control.value);
+          const valid = value === null || Number.isFinite(value) && (key === 'subtitle_delay_sec' ? value >= -60 && value <= 60 : value >= 0.1 && value <= 3);
+          if (!valid) { error.textContent = key === 'subtitle_delay_sec' ? 'Enter -60 to 60 seconds, or leave blank.' : 'Enter 0.1 to 3, or leave blank.'; control.focus(); return; }
+          patch[key] = value;
+        }
+        const controls = $$('button', subtitles); controls.forEach((control) => { control.disabled = true; });
+        try { await API.patchShow(id, patch); Object.assign(show, patch); error.textContent = ''; toast('Subtitle preferences saved', 'ok'); await rerender(true); }
+        catch (failure) { error.textContent = failure.message; }
+        finally { controls.forEach((control) => { control.disabled = false; }); }
+      });
+    }
     const form = $('#show-form', root);
     if (!form) return;
     // SPEC-v1.3 1.5: "Absolute numbering starts at" = episode_offset + 1; empty = 0 (use AniList's prequel chain).
@@ -1293,6 +1357,8 @@
     ] },
     { id: 'open', title: 'Playback', desc: 'What the Play button opens.', fields: [
       { path: 'open.player_path', label: 'Player program', type: 'text', span: 2, placeholder: winOr('C:\\Program Files\\mpv\\mpv.exe', '/usr/bin/mpv'), help: 'Empty = the system\'s default app for video files.' },
+      { path: 'open.subtitle_delay_sec', label: 'Subtitle delay (seconds)', type: 'float', min: -60, max: 60, step: 0.1, help: 'Positive = subtitles appear later. Negative = earlier.' },
+      { path: 'open.subtitle_scale', label: 'Subtitle size (×)', type: 'float', min: 0.1, max: 3, step: 0.1, help: '1 = normal size; 0.6 = 60%. SMPlayer opens a separate playback profile. Changes made inside it do not update your normal SMPlayer settings.' },
       { path: 'open.intro_skip_sec', label: 'Skip company logos at the start (seconds)', type: 'int', min: 0, max: 600, span: 2, help: "Play starts this many seconds in for files tagged as streaming-service rips (the ones that open with a long logo animation). 0 = off. A show page can set its own number for all of its episodes. Works by starting your player with its start-position option: verified with SMPlayer; mpv, mpv.net, VLC, MPC-HC, MPC-BE, PotPlayer, Zoom Player, ffplay, MPlayer, Celluloid and IINA use the option from their docs and are untested. If an episode starts at 0:00 anyway or the player complains, set 0 here and report it on GitHub. Other players open the file from the start." },
     ] },
     { id: 'titles', title: 'Titles', desc: 'How show names are written.', fields: [
@@ -1632,6 +1698,7 @@
     async play(btn, ds) {
       const r = await API.openFile(ds.file);
       const what = ds.label || 'the episode';
+      if (r?.subtitles_unsupported) toast(r.subtitle_note || 'Subtitle preferences could not be applied to this player.', 'warn');
       if (r && r.skipped_sec > 0) toast(`Opening ${what}, skipping the first ${r.skipped_sec} s${r.tested ? '' : ' (untested with ' + (r.player || 'this player') + ': report it if it starts at 0:00)'}`, 'ok');
       else if (r && r.wanted_sec > 0) toast(`Opening ${what} from the start: ${r.player ? r.player + ' has' : 'your player has'} no known start option, so the logos cannot be skipped`, 'warn');
       else toast(`Opening ${what} in your player`, 'ok');

@@ -40,8 +40,8 @@ func TestMigrate3(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if v, _, _ := d.Meta(ctx, "schema_version"); v != "4" {
-		t.Fatalf("schema_version = %q, want 4", v)
+	if v, _, _ := d.Meta(ctx, "schema_version"); v != "5" {
+		t.Fatalf("schema_version = %q, want 5", v)
 	}
 	sh, err := d.GetShow(ctx, 7)
 	if err != nil || sh.AbsOffset != nil || EffectiveOffset(sh) != 0 {

@@ -659,6 +659,11 @@ details.panel[open] > summary { margin-bottom: 16px; }
 .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
 
 .ep-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 16px; }
+.ep-table .c-act > .acts { flex-wrap: wrap; }
+.episode-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; flex-basis: 100%; }
+.episode-controls .btn { white-space: normal; height: auto; min-height: 30px; }
+.delete-files { overflow-wrap: anywhere; }
+.subtitle-form { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--edge); }
 .ep-table th { text-align: left; font-size: var(--fs-1); font-weight: 650; color: var(--fg-2); text-transform: uppercase; letter-spacing: .05em; padding: 0 12px 10px; border-bottom: 1px solid var(--edge); white-space: nowrap; }
 .ep-table td { height: 52px; padding: 6px 12px; border-bottom: 1px solid var(--edge); vertical-align: middle; }
 .ep-table tbody tr:last-child td { border-bottom: 0; }
@@ -683,7 +688,7 @@ details.panel[open] > summary { margin-bottom: 16px; }
 .pick-toggle[aria-expanded="true"] { background: rgba(255, 255, 255, .08); }
 .pick-toggle[aria-expanded="true"] .ico { transform: rotate(180deg); }
 .pick-n { padding: 0 7px; border-radius: var(--r-pill); background: rgba(255, 255, 255, .1); font-size: 13px; line-height: 20px; color: var(--fg-2); }
-.ep-table .c-act { width: 1%; white-space: nowrap; }
+.ep-table .c-act { width: 300px; min-width: 300px; white-space: nowrap; }
 .acts { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
 .acts-pair { display: inline-flex; gap: 6px; align-items: center; flex: none; }
 .btn-watch.is-on { background: color-mix(in oklab, var(--ok) 16%, transparent); border-color: rgba(95, 214, 160, .45); color: var(--ok); }
@@ -928,6 +933,7 @@ details.panel[open] > summary { margin-bottom: 16px; }
   .ep-table td, .ep-table td[class] { border: 0; padding: 0; width: auto; max-width: none; height: auto; }
   .ep-table .c-n { grid-row: span 4; font-size: 18px; }
   .ep-table .c-aired, .ep-table .c-state, .ep-table .c-rel, .ep-table .c-act { grid-column: 2; }
+  .ep-table .c-act { width: auto; min-width: 0; }
   .ep-table .acts { justify-content: flex-start; flex-wrap: wrap; }
   .ep-table tr.is-next td:first-child { box-shadow: none; }
   .ep-table tr.is-next { box-shadow: inset 3px 0 0 var(--accent); background: color-mix(in oklab, var(--accent) 6%, transparent); }

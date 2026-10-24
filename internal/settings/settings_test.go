@@ -24,7 +24,7 @@ func TestDefaults(t *testing.T) {
 		d.Conveyor.FallbackHours != 12 || !d.Conveyor.SkipBatchesWhileAiring || !d.Conveyor.AutoReplaceV2 ||
 		d.Conveyor.MinSeeders != 1 || d.Conveyor.LookbackDays != 14 || d.Conveyor.MaxReleaseGiB != 4 || d.Conveyor.MinFreeGiB != 5 || d.Conveyor.SizePreference != SizeSmall ||
 		d.Watched.Mode != "fraction" || d.Watched.Fraction != 0.5 || d.Watched.DefaultRuntimeMin != 24 || d.Watched.PollSec != 5 ||
-		len(d.Watched.PlayerTitles) != 5 || d.Titles.Language != "romaji" || d.Dubs.Enabled || !d.Dubs.ShowInCalendar ||
+		len(d.Watched.PlayerTitles) != 6 || d.Open.SubtitleDelaySec != 0 || d.Open.SubtitleScale != 1 || d.Titles.Language != "romaji" || d.Dubs.Enabled || !d.Dubs.ShowInCalendar ||
 		d.Push.AniList || d.Push.MAL || d.UI.Theme != "glass" || d.Notify.Toast ||
 		d.Downloader.Mode != ModeManual || d.Downloader.TorrentDir != "" || d.Open.FolderOnStart || d.UI.SetupDone ||
 		d.Library.Folders == nil || len(d.Library.Folders) != 0 {

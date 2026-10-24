@@ -25,7 +25,7 @@ Every rule and threshold above is a setting, editable in the UI. Nothing is hard
 
 ## 1. Stack and layout
 
-- Go 1.27 (`F:\DevTools\go\bin\go`, `GOPATH=F:\DevTools\gopath`, `GOCACHE=F:\DevTools\gocache`). Module path `github.com/Nostramadeus/AnimeBeltConveyor`.
+- Go 1.27 (`go`, `GOPATH=%USERPROFILE%\go`, `GOCACHE=%LOCALAPPDATA%\go-build`). Module path `github.com/Nostramadeus/AnimeBeltConveyor`.
 - SQLite via `modernc.org/sqlite` (pure Go, no cgo). File: `<datadir>/abc.db`.
 - `<datadir>` = `%APPDATA%\abc` on Windows, `~/.config/abc` on Linux, `~/Library/Application Support/abc` on macOS. Override with `--data <dir>`.
 - Web UI = static files in `web/`, embedded with `embed.FS`, served at `/`. Plain HTML, CSS, JS. No framework, no build step, no npm.
@@ -331,11 +331,11 @@ Accessibility and quality rules: all text on glass or solid, never on raw banner
 
 ## 10. Build, run, test
 ```
-set GOPATH=F:\DevTools\gopath
-set GOCACHE=F:\DevTools\gocache
-F:\DevTools\go\bin\go build -o abc.exe ./cmd/abc
+set GOPATH=%USERPROFILE%\go
+set GOCACHE=%LOCALAPPDATA%\go-build
+go build -o abc.exe ./cmd/abc
 abc.exe --data .dev-data --no-browser
-F:\DevTools\go\bin\go test ./...
+go test ./...
 ```
 - `go vet ./...` clean. Unit tests required for parse, match, release, nyaa (RSS fixture), qbit (httptest), anilist (httptest), settings validation, store migrations.
 - Never auto-open a browser from a test or an agent run (`--no-browser`). the user opens the URL.

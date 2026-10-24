@@ -47,6 +47,28 @@ type Torrent struct {
 	Size        int64   `json:"size"`
 }
 
+type TorrentFile struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+func (c *Client) Files(ctx context.Context, hash string) ([]TorrentFile, error) {
+	body, err := c.get(ctx, "/api/v2/torrents/files", url.Values{"hash": {hash}})
+	if err != nil {
+		return nil, err
+	}
+	var files []TorrentFile
+	if err := json.Unmarshal(body, &files); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func (c *Client) Remove(ctx context.Context, hash string) error {
+	_, err := c.postForm(ctx, "/api/v2/torrents/delete", url.Values{"hashes": {hash}, "deleteFiles": {"false"}})
+	return err
+}
+
 // New returns a client for baseURL (e.g. "http://127.0.0.1:8080").
 func New(baseURL, username, password string) *Client {
 	jar, _ := cookiejar.New(nil)

@@ -44,24 +44,27 @@ type NextEp struct {
 // ShowFull is ShowCard plus every per-show field (ShowDetail.show, PATCH reply).
 type ShowFull struct {
 	ShowCard
-	MALID         int64    `json:"mal_id"`
-	TitleNative   string   `json:"title_native"`
-	Synonyms      []string `json:"synonyms"`
-	Season        string   `json:"season"`
-	SeasonYear    *int     `json:"season_year"`
-	DurationMin   *int     `json:"duration_min"`
-	SearchQuery   string   `json:"search_query"`
-	EpisodeOffset int      `json:"episode_offset"`
-	GroupOrder    []string `json:"group_order"`
-	Resolution    string   `json:"resolution"`
-	AutoDownload  *bool    `json:"auto_download"`
-	Folder        string   `json:"folder"`
-	AutoFrom      *int     `json:"auto_from"`  // episodes below it are never auto-downloaded; null = no floor
-	AbsOffset     *int     `json:"abs_offset"` // episodes before this show in its series (AniList prequel chain); null = unknown
-	SavePath      string   `json:"save_path"`  // where downloads go with current settings
-	NyaaQuery     string   `json:"nyaa_query"`
-	AddedAt       int64    `json:"added_at"`
-	UpdatedAt     int64    `json:"updated_at"`
+	MALID            int64    `json:"mal_id"`
+	TitleNative      string   `json:"title_native"`
+	Synonyms         []string `json:"synonyms"`
+	Season           string   `json:"season"`
+	SeasonYear       *int     `json:"season_year"`
+	DurationMin      *int     `json:"duration_min"`
+	SearchQuery      string   `json:"search_query"`
+	EpisodeOffset    int      `json:"episode_offset"`
+	GroupOrder       []string `json:"group_order"`
+	Resolution       string   `json:"resolution"`
+	AutoDownload     *bool    `json:"auto_download"`
+	Folder           string   `json:"folder"`
+	AutoFrom         *int     `json:"auto_from"`  // episodes below it are never auto-downloaded; null = no floor
+	AbsOffset        *int     `json:"abs_offset"` // episodes before this show in its series (AniList prequel chain); null = unknown
+	SavePath         string   `json:"save_path"`  // where downloads go with current settings
+	NyaaQuery        string   `json:"nyaa_query"`
+	IntroSkipSec     *int     `json:"intro_skip_sec"`
+	SubtitleDelaySec *float64 `json:"subtitle_delay_sec"`
+	SubtitleScale    *float64 `json:"subtitle_scale"`
+	AddedAt          int64    `json:"added_at"`
+	UpdatedAt        int64    `json:"updated_at"`
 }
 
 // EpisodeRow is one episode with its best file and current release (SPEC 8).
@@ -174,6 +177,7 @@ func (cc *cardCtx) full(sh store.Show) ShowFull {
 		SeasonYear: sh.SeasonYear, DurationMin: sh.DurationMin, SearchQuery: sh.SearchQuery, EpisodeOffset: sh.EpisodeOffset,
 		GroupOrder: sh.GroupOrder, Resolution: sh.Resolution, AutoDownload: sh.AutoDownload, Folder: sh.Folder, AutoFrom: sh.AutoFrom,
 		AbsOffset: apiAbsOffset(sh.AbsOffset), SavePath: sched.SavePath(cc.c, sh), NyaaQuery: sched.NyaaQuery(sh), AddedAt: sh.AddedAt, UpdatedAt: sh.UpdatedAt,
+		IntroSkipSec: sh.IntroSkipSec, SubtitleDelaySec: sh.SubtitleDelaySec, SubtitleScale: sh.SubtitleScale,
 	}
 }
 

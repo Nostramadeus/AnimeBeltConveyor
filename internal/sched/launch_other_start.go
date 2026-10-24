@@ -22,3 +22,19 @@ func (l osLauncher) OpenAt(playerPath, file string, startSec int) (<-chan struct
 	done, err := l.Open(playerPath, file)
 	return done, PlayerName(playerPath), false, err
 }
+
+func (l osLauncher) OpenPlayback(playerPath, file string, start int, options SubtitleOptions) (<-chan struct{}, string, bool, bool, string, error) {
+	if playerPath == "" || !options.Requested && !smplayerName(playerPath) {
+		done, player, skipped, err := l.OpenAt(playerPath, file, start)
+		return done, player, skipped, false, "", err
+	}
+	command := playbackArgs(playerPath, file, start, options)
+	cmd := exec.Command(playerPath, command.args...)
+	if err := cmd.Start(); err != nil {
+		command.cleanup()
+		return nil, PlayerName(playerPath), false, false, command.note, err
+	}
+	done := make(chan struct{})
+	go func() { cmd.Wait(); command.cleanup(); close(done) }()
+	return done, PlayerName(playerPath), command.skipped, command.subtitles, command.note, nil
+}

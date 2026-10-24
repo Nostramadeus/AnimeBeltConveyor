@@ -415,6 +415,8 @@ func (s *Sched) finishReplacements(ctx context.Context, showID int64, ep int) {
 
 // qbitRun polls qBittorrent for releases that are added / downloading.
 func (s *Sched) qbitRun(ctx context.Context) error {
+	s.addMu.Lock()
+	defer s.addMu.Unlock()
 	c := s.set.Get()
 	if c.Downloader.Mode != settings.ModeQbit {
 		return nil

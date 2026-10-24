@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -213,7 +214,9 @@ type Open struct {
 	// IntroSkipSec: seconds the Play button skips at the start of a Netflix-sourced
 	// file (name tagged NF / Netflix / NFLX), by launching the player with its
 	// start-position flag. 0 = off. Per show: Show.IntroSkipSec.
-	IntroSkipSec int `json:"intro_skip_sec"`
+	IntroSkipSec     int     `json:"intro_skip_sec"`
+	SubtitleDelaySec float64 `json:"subtitle_delay_sec"`
+	SubtitleScale    float64 `json:"subtitle_scale"`
 }
 
 type UI struct {
@@ -245,8 +248,9 @@ func Defaults() Settings {
 		SkipBatchesWhileAiring: true, AutoReplaceV2: true, MinSeeders: 1, LookbackDays: 14, MaxReleaseGiB: 4,
 		MinFreeGiB: 5, SizePreference: SizeSmall}
 	s.Watched = Watched{Mode: "fraction", Fraction: 0.5, DefaultRuntimeMin: 24, PollSec: 5,
-		PlayerTitles: []string{"mpv", "VLC media player", "MPC-HC", "MPC-BE", "PotPlayer"}}
+		PlayerTitles: []string{"mpv", "VLC media player", "MPC-HC", "MPC-BE", "PotPlayer", "SMPlayer"}}
 	s.Open.IntroSkipSec = 10
+	s.Open.SubtitleScale = 1
 	s.Titles.Language = "romaji"
 	s.Dubs = Dubs{Enabled: false, ShowInCalendar: true}
 	s.UI.Theme = "glass"
@@ -436,6 +440,12 @@ func (s Settings) Validate() map[string]string {
 	if s.Open.IntroSkipSec < 0 || s.Open.IntroSkipSec > 600 {
 		e["open.intro_skip_sec"] = "must be between 0 and 600 seconds"
 	}
+	if math.IsNaN(s.Open.SubtitleDelaySec) || math.IsInf(s.Open.SubtitleDelaySec, 0) || s.Open.SubtitleDelaySec < -60 || s.Open.SubtitleDelaySec > 60 {
+		e["open.subtitle_delay_sec"] = "must be between -60 and 60 seconds"
+	}
+	if math.IsNaN(s.Open.SubtitleScale) || math.IsInf(s.Open.SubtitleScale, 0) || s.Open.SubtitleScale < 0.1 || s.Open.SubtitleScale > 3 {
+		e["open.subtitle_scale"] = "must be between 0.1 and 3"
+	}
 	if msg := checkURL(s.Conveyor.NyaaBase); msg != "" {
 		e["conveyor.nyaa_base"] = msg
 	}
@@ -528,6 +538,9 @@ func Load(kv KV) (Settings, error) {
 	s = loadBase
 	if err := json.Unmarshal([]byte(raw), &s); err != nil {
 		return Defaults(), fmt.Errorf("settings blob: %w", err)
+	}
+	if slices.Equal(s.Watched.PlayerTitles, []string{"mpv", "VLC media player", "MPC-HC", "MPC-BE", "PotPlayer"}) {
+		s.Watched.PlayerTitles = append(s.Watched.PlayerTitles, "SMPlayer")
 	}
 	s.Normalize()
 	return s, nil

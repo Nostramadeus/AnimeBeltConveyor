@@ -36,6 +36,27 @@ func (l osLauncher) OpenAt(playerPath, file string, startSec int) (<-chan struct
 	return done, PlayerName(exe), false, err
 }
 
+func (l osLauncher) OpenPlayback(playerPath, file string, start int, options SubtitleOptions) (<-chan struct{}, string, bool, bool, string, error) {
+	exe := playerPath
+	if exe == "" {
+		exe = defaultHandlerExe(filepath.Ext(file))
+	}
+	if exe == "" || !options.Requested && !smplayerName(exe) {
+		done, player, skipped, err := l.OpenAt(playerPath, file, start)
+		return done, player, skipped, false, "", err
+	}
+	command := playbackArgs(exe, file, start, options)
+	cmd := exec.Command(exe, command.args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
+	if err := cmd.Start(); err != nil {
+		command.cleanup()
+		return nil, PlayerName(exe), false, false, command.note, err
+	}
+	done := make(chan struct{})
+	go func() { cmd.Wait(); command.cleanup(); close(done) }()
+	return done, PlayerName(exe), command.skipped, command.subtitles, command.note, nil
+}
+
 // defaultHandlerExe is the program Windows opens files with extension ext
 // (".mkv") with: the user's choice under Explorer\FileExts, else the class
 // registered for the extension; "" when none or unreadable.

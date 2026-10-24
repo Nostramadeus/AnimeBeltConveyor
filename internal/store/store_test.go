@@ -28,7 +28,7 @@ func TestOpenMigrateIdempotent(t *testing.T) {
 	}
 	ctx := context.Background()
 	v, ok, err := d.Meta(ctx, "schema_version")
-	if err != nil || !ok || v != "4" {
+	if err != nil || !ok || v != "5" {
 		t.Fatalf("schema_version = %q %v %v", v, ok, err)
 	}
 	var mode string
@@ -395,8 +395,8 @@ func TestMigrate2AddsAutoColumns(t *testing.T) {
 	}
 	defer d.Close()
 	ctx := context.Background()
-	if v, _, _ := d.Meta(ctx, "schema_version"); v != "4" { // migrate_2, _3, _4
-		t.Fatalf("schema_version = %q, want 4", v)
+	if v, _, _ := d.Meta(ctx, "schema_version"); v != "5" {
+		t.Fatalf("schema_version = %q, want 5", v)
 	}
 	hasCol := func(table, col string) bool {
 		rows, err := d.SQL().Query(`SELECT name FROM pragma_table_info(?)`, table)
@@ -483,7 +483,7 @@ func TestMigrate4IntroSkip(t *testing.T) {
 	if got, _ := d.GetShow(ctx, sh.ID); got.IntroSkipSec == nil || *got.IntroSkipSec != 12 {
 		t.Fatalf("intro_skip_sec = %v, want 12", got.IntroSkipSec)
 	}
-	if v, _, _ := d.Meta(ctx, "schema_version"); v != "4" {
-		t.Fatalf("schema_version = %q, want 4", v)
+	if v, _, _ := d.Meta(ctx, "schema_version"); v != "5" {
+		t.Fatalf("schema_version = %q, want 5", v)
 	}
 }

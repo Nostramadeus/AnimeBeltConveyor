@@ -42,9 +42,11 @@ type Show struct {
 	AbsOffset *int `json:"abs_offset"`
 	// IntroSkipSec overrides open.intro_skip_sec for Netflix-sourced files of this
 	// show (migrate_4): nil = global setting, 0 = never skip, N = skip N seconds.
-	IntroSkipSec *int  `json:"intro_skip_sec"`
-	AddedAt      int64 `json:"added_at"`
-	UpdatedAt    int64 `json:"updated_at"`
+	IntroSkipSec     *int     `json:"intro_skip_sec"`
+	SubtitleDelaySec *float64 `json:"subtitle_delay_sec"`
+	SubtitleScale    *float64 `json:"subtitle_scale"`
+	AddedAt          int64    `json:"added_at"`
+	UpdatedAt        int64    `json:"updated_at"`
 }
 
 // EffectiveOffset is the offset between release numbering and AniList
@@ -73,17 +75,17 @@ var ListStatuses = []string{"watching", "planning", "completed", "paused", "drop
 const showCols = `id, anilist_id, mal_id, title_romaji, title_english, title_native, synonyms,
 	cover_url, banner_url, color, format, status, season, season_year, episodes_total, duration_min,
 	next_airing_ep, next_airing_at, list_status, score, search_query, episode_offset, group_order,
-	resolution, auto_download, folder, auto_from, abs_offset, intro_skip_sec, added_at, updated_at`
+	resolution, auto_download, folder, auto_from, abs_offset, intro_skip_sec, subtitle_delay_sec, subtitle_scale, added_at, updated_at`
 
 func scanShow(r scanner) (Show, error) {
 	var s Show
 	var anilist, mal, seasonYear, epTotal, dur, nextEp, nextAt, auto, autoFrom, absOffset, introSkip sql.NullInt64
 	var eng, native, syn, cover, banner, color, format, status, season, query, groups, res, folder sql.NullString
-	var score sql.NullFloat64
+	var score, subtitleDelay, subtitleScale sql.NullFloat64
 	err := r.Scan(&s.ID, &anilist, &mal, &s.TitleRomaji, &eng, &native, &syn,
 		&cover, &banner, &color, &format, &status, &season, &seasonYear, &epTotal, &dur,
 		&nextEp, &nextAt, &s.ListStatus, &score, &query, &s.EpisodeOffset, &groups,
-		&res, &auto, &folder, &autoFrom, &absOffset, &introSkip, &s.AddedAt, &s.UpdatedAt)
+		&res, &auto, &folder, &autoFrom, &absOffset, &introSkip, &subtitleDelay, &subtitleScale, &s.AddedAt, &s.UpdatedAt)
 	if err != nil {
 		return s, err
 	}
@@ -107,6 +109,7 @@ func scanShow(r scanner) (Show, error) {
 	s.AutoFrom = ptrInt(autoFrom)
 	s.AbsOffset = ptrInt(absOffset)
 	s.IntroSkipSec = ptrInt(introSkip)
+	s.SubtitleDelaySec, s.SubtitleScale = ptrFloat(subtitleDelay), ptrFloat(subtitleScale)
 	return s, nil
 }
 
@@ -125,12 +128,12 @@ func (d *DB) CreateShow(ctx context.Context, s *Show) error {
 	if s.Synonyms == nil {
 		s.Synonyms = []string{}
 	}
-	res, err := d.db.ExecContext(ctx, `INSERT INTO shows(`+showCols[4:]+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	res, err := d.db.ExecContext(ctx, `INSERT INTO shows(`+showCols[4:]+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		nid(s.AniListID), nid(s.MALID), s.TitleRomaji, nstr(s.TitleEnglish), nstr(s.TitleNative), jsonList(s.Synonyms),
 		nstr(s.CoverURL), nstr(s.BannerURL), nstr(s.Color), nstr(s.Format), nstr(s.Status), nstr(s.Season),
 		nint(s.SeasonYear), nint(s.EpisodesTotal), nint(s.DurationMin), nint(s.NextAiringEp), nint64(s.NextAiringAt),
 		s.ListStatus, nfloat(s.Score), nstr(s.SearchQuery), s.EpisodeOffset, njsonList(s.GroupOrder),
-		nstr(s.Resolution), nbool(s.AutoDownload), nstr(s.Folder), nint(s.AutoFrom), nint(s.AbsOffset), nint(s.IntroSkipSec), s.AddedAt, s.UpdatedAt)
+		nstr(s.Resolution), nbool(s.AutoDownload), nstr(s.Folder), nint(s.AutoFrom), nint(s.AbsOffset), nint(s.IntroSkipSec), nfloat(s.SubtitleDelaySec), nfloat(s.SubtitleScale), s.AddedAt, s.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -201,9 +204,9 @@ func (d *DB) UpdateShowMeta(ctx context.Context, s *Show) error {
 func (d *DB) UpdateShowPrefs(ctx context.Context, s *Show) error {
 	s.UpdatedAt = Now()
 	return d.exec1(ctx, `UPDATE shows SET list_status=?, score=?, search_query=?, episode_offset=?, group_order=?,
-		resolution=?, auto_download=?, folder=?, auto_from=?, intro_skip_sec=?, updated_at=? WHERE id=?`,
+		resolution=?, auto_download=?, folder=?, auto_from=?, intro_skip_sec=?, subtitle_delay_sec=?, subtitle_scale=?, updated_at=? WHERE id=?`,
 		s.ListStatus, nfloat(s.Score), nstr(s.SearchQuery), s.EpisodeOffset, njsonList(s.GroupOrder),
-		nstr(s.Resolution), nbool(s.AutoDownload), nstr(s.Folder), nint(s.AutoFrom), nint(s.IntroSkipSec), s.UpdatedAt, s.ID)
+		nstr(s.Resolution), nbool(s.AutoDownload), nstr(s.Folder), nint(s.AutoFrom), nint(s.IntroSkipSec), nfloat(s.SubtitleDelaySec), nfloat(s.SubtitleScale), s.UpdatedAt, s.ID)
 }
 
 // DeleteShow removes a show; episodes and releases cascade, files keep their row with show_id NULL.
