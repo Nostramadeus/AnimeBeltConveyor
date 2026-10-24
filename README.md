@@ -35,7 +35,7 @@ Download episodes with your normal torrent client, then put them inside an **act
 
 Settings › Playback has **Subtitle delay (seconds)** and **Subtitle size (×)**. Defaults are 0 seconds and 1×. Positive delay shows subtitles later; negative shows them earlier. A show's Rules panel can override either value; blank inherits the global value. Text and ASS subtitles support scaling in mpv, mpv.net, Celluloid, IINA and SMPlayer with an mpv backend. Burned-in subtitles cannot be resized. Other players report unsupported adjustments.
 
-SMPlayer opens a separate playback profile. Changes made inside it do not update your normal SMPlayer settings. Existing logo skipping still applies. ABC tracks the launched player process even with no logo skip. Automatic watched detection counts elapsed detected-player time, including paused time; it does not read the playback/seek position. Manual and “as soon as it opens” modes stay available.
+SMPlayer opens a disposable playback profile with a fresh entry for the selected episode; existing playback history is not copied. Changes made inside it do not update your normal SMPlayer settings. Its subtitle delay has one-millisecond precision; ABC preserves your saved decimal preference. On Windows, Play makes one best-effort request to bring this new SMPlayer window forward. Windows may deny it; ABC then flashes that window's taskbar button. Switching to another app cancels the request. Existing logo skipping still applies. ABC tracks the launched player process even with no logo skip. Automatic watched detection counts elapsed detected-player time, including paused time; it does not read the playback/seek position. Manual and “as soon as it opens” modes stay available.
 
 ## Screens
 

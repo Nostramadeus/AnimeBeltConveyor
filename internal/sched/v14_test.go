@@ -431,11 +431,13 @@ func TestV14SubtitleArgsAndSMPlayerProfile(t *testing.T) {
 	exe := filepath.Join(dir, "smplayer.exe")
 	source := filepath.Join(dir, "smplayer.ini")
 	touch(t, filepath.Join(dir, "mpv", "mpv.exe"))
-	original := "[General]\nmplayer_bin=mpv/mpv.exe\nremember_time_pos=true\n[advanced]\nmplayer_additional_options=\"--volume=25 --title=\\\"Test title\\\"\"\n[custom]\nuntouched=yes\n"
+	media := filepath.Join(dir, "episode.mkv")
+	touch(t, media)
+	original := "[%General]\nmplayer_bin=mpv/mpv.exe\nremember_time_pos=true\n[advanced]\nmplayer_additional_options=\"--volume=25 --title=\\\"Test title\\\"\"\n[custom]\nuntouched=yes\n"
 	if err := os.WriteFile(source, []byte(original), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	profile, cleanup, err := smplayerProfileFrom(exe, options, []string{source})
+	profile, cleanup, err := smplayerProfileFrom(exe, media, options, []string{source})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +446,7 @@ func TestV14SubtitleArgsAndSMPlayerProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, want := range []string{"single_instance_enabled=false", "remember_media_settings=false", "remember_time_pos=false", "initial_sub_scale_ass=0.625", "initial_sub_scale=3.125", "untouched=yes", "--volume=25", "sub-delay=0.825", "sub-ass-override=scale"} {
+	for _, want := range []string{"single_instance_enabled=false", "remember_media_settings=true", "remember_time_pos=false", "initial_sub_scale_ass=0.625", "initial_sub_scale=3.125", "untouched=yes", "--volume=25", "sub-delay=0.825", "sub-ass-override=scale"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %s: %s", want, text)
 		}

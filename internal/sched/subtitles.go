@@ -2,12 +2,14 @@ package sched
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/Nostramadeus/AnimeBeltConveyor/internal/settings"
@@ -70,7 +72,12 @@ func playbackArgs(exe, file string, start int, options SubtitleOptions) playback
 		command.skipped = true
 	}
 	if smplayerName(exe) {
-		profile, cleanup, err := smplayerProfile(exe, options)
+		absolute, err := filepath.Abs(file)
+		if err != nil {
+			command.note = "Subtitle preferences were not applied: " + err.Error()
+			return command
+		}
+		profile, cleanup, err := smplayerProfile(exe, absolute, options)
 		if err != nil {
 			command.note = "Subtitle preferences were not applied: " + err.Error()
 			return command
@@ -81,7 +88,7 @@ func playbackArgs(exe, file string, start int, options SubtitleOptions) playback
 			command.args = append(command.args, "-start", strconv.Itoa(start))
 			command.skipped = true
 		}
-		command.args = append(command.args, file)
+		command.args = append(command.args, absolute)
 		command.subtitles = true
 		return command
 	}
@@ -115,11 +122,13 @@ func iniValue(raw string) (string, error) {
 }
 
 func iniKey(lines []string, section, key string) (string, bool) {
-	current := "General"
+	current := ""
+	var result string
+	found := false
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			current = line[1 : len(line)-1]
+			current = iniGroupName(line[1 : len(line)-1])
 			continue
 		}
 		if current != section || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") {
@@ -127,23 +136,24 @@ func iniKey(lines []string, section, key string) (string, bool) {
 		}
 		name, value, ok := strings.Cut(line, "=")
 		if ok && strings.TrimSpace(name) == key {
-			return value, true
+			result, found = value, true
 		}
 	}
-	return "", false
+	return result, found
 }
 
 func setINI(lines []string, section, key, value string) []string {
-	current := "General"
+	current := ""
 	sectionEnd := -1
-	foundSection := section == "General"
+	foundSection := section == ""
+	foundKey := false
 	for index, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 			if current == section {
 				sectionEnd = index
 			}
-			current = trimmed[1 : len(trimmed)-1]
+			current = iniGroupName(trimmed[1 : len(trimmed)-1])
 			if current == section {
 				foundSection = true
 				sectionEnd = len(lines)
@@ -153,11 +163,18 @@ func setINI(lines []string, section, key, value string) []string {
 		name, _, ok := strings.Cut(trimmed, "=")
 		if current == section && ok && strings.TrimSpace(name) == key {
 			lines[index] = key + "=" + value
-			return lines
+			foundKey = true
 		}
 	}
+	if foundKey {
+		return lines
+	}
 	if !foundSection {
-		return append(lines, "["+section+"]", key+"="+value)
+		header := section
+		if section == "General" {
+			header = "%General"
+		}
+		return append(lines, "["+header+"]", key+"="+value)
 	}
 	if sectionEnd < 0 {
 		sectionEnd = len(lines)
@@ -165,7 +182,39 @@ func setINI(lines []string, section, key, value string) []string {
 	return append(lines[:sectionEnd], append([]string{key + "=" + value}, lines[sectionEnd:]...)...)
 }
 
-func smplayerProfile(exe string, options SubtitleOptions) (string, func(), error) {
+func iniGroupName(header string) string {
+	if strings.EqualFold(header, "General") {
+		return ""
+	}
+	if strings.EqualFold(header, "%General") {
+		return "General"
+	}
+	return header
+}
+
+func qtINIKey(key string) string {
+	var encoded strings.Builder
+	for _, unit := range utf16.Encode([]rune(key)) {
+		switch {
+		case unit == '/':
+			encoded.WriteByte('\\')
+		case unit >= 'a' && unit <= 'z' || unit >= 'A' && unit <= 'Z' || unit >= '0' && unit <= '9' || unit == '_' || unit == '-' || unit == '.':
+			encoded.WriteByte(byte(unit))
+		case unit <= 255:
+			fmt.Fprintf(&encoded, "%%%02X", unit)
+		default:
+			fmt.Fprintf(&encoded, "%%U%04X", unit)
+		}
+	}
+	return encoded.String()
+}
+
+func smplayerMediaGroup(file string, size int64) string {
+	name := strings.NewReplacer("/", "_", "\\", "_", ":", "_", ".", "_", " ", "_").Replace(file)
+	return name + "_" + strconv.FormatInt(size, 10)
+}
+
+func smplayerProfile(exe, file string, options SubtitleOptions) (string, func(), error) {
 	if resolved, err := exec.LookPath(exe); err == nil {
 		exe = resolved
 	}
@@ -180,10 +229,19 @@ func smplayerProfile(exe string, options SubtitleOptions) (string, func(), error
 		}
 		userConfig = filepath.Join(base, "smplayer", "smplayer.ini")
 	}
-	return smplayerProfileFrom(exe, options, []string{filepath.Join(filepath.Dir(exe), "smplayer.ini"), filepath.Join(filepath.Dir(exe), "config", "smplayer.ini"), userConfig})
+	return smplayerProfileFrom(exe, file, options, []string{filepath.Join(filepath.Dir(exe), "smplayer.ini"), filepath.Join(filepath.Dir(exe), "config", "smplayer.ini"), userConfig})
 }
 
-func smplayerProfileFrom(exe string, options SubtitleOptions, sources []string) (string, func(), error) {
+func smplayerProfileFrom(exe, file string, options SubtitleOptions, sources []string) (string, func(), error) {
+	media, err := os.Stat(file)
+	if err != nil || !media.Mode().IsRegular() {
+		return "", nil, fmt.Errorf("SMPlayer media must be an existing regular file")
+	}
+	if !filepath.IsAbs(file) {
+		return "", nil, fmt.Errorf("SMPlayer media path must be absolute")
+	}
+	delayMilliseconds := int64(math.Round(options.Delay * 1000))
+	options.Delay = float64(delayMilliseconds) / 1000
 	var body []byte
 	for _, source := range sources {
 		data, err := os.ReadFile(source)
@@ -241,8 +299,9 @@ func smplayerProfileFrom(exe string, options SubtitleOptions, sources []string) 
 	engineOptions = strings.TrimSpace(engineOptions + " " + strings.Join(args, " "))
 	values := []struct{ section, key, value string }{
 		{"instances", "single_instance_enabled", "false"},
-		{"General", "remember_media_settings", "false"},
+		{"General", "remember_media_settings", "true"},
 		{"General", "remember_time_pos", "false"},
+		{"General", "file_settings_method", "normal"},
 		{"General", "mplayer_bin", strconv.Quote(engine)},
 		{"defaults", "initial_sub_scale_ass", strconv.FormatFloat(options.Scale, 'f', -1, 64)},
 		{"defaults", "initial_sub_scale", strconv.FormatFloat(5*options.Scale, 'f', -1, 64)},
@@ -257,6 +316,11 @@ func smplayerProfileFrom(exe string, options SubtitleOptions, sources []string) 
 	}
 	cleanup := func() { os.RemoveAll(dir) }
 	if err := os.WriteFile(filepath.Join(dir, "smplayer.ini"), []byte(strings.TrimSpace(strings.Join(lines, "\n"))+"\n"), 0o600); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	mediaSettings := "[" + qtINIKey(smplayerMediaGroup(file, media.Size())) + "]\nsaved=true\nsub_delay=" + strconv.FormatInt(delayMilliseconds, 10) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "smplayer_files.ini"), []byte(mediaSettings), 0o600); err != nil {
 		cleanup()
 		return "", nil, err
 	}

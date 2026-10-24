@@ -48,12 +48,19 @@ func (l osLauncher) OpenPlayback(playerPath, file string, start int, options Sub
 	command := playbackArgs(exe, file, start, options)
 	cmd := exec.Command(exe, command.args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
+	var initialForeground uint32
+	if smplayerName(exe) {
+		initialForeground = foregroundProcess()
+	}
 	if err := cmd.Start(); err != nil {
 		command.cleanup()
 		return nil, PlayerName(exe), false, false, command.note, err
 	}
 	done := make(chan struct{})
 	go func() { cmd.Wait(); command.cleanup(); close(done) }()
+	if smplayerName(exe) && initialForeground != 0 {
+		go foregroundSMPlayer(uint32(cmd.Process.Pid), initialForeground, done, nativeForegroundOperations())
+	}
 	return done, PlayerName(exe), command.skipped, command.subtitles, command.note, nil
 }
 
