@@ -4,6 +4,8 @@
 
 <h1 align="center">AnimeBeltConveyor (ABC)</h1>
 
+**Contact:** [afrotankrob@gmail.com](mailto:afrotankrob@gmail.com)
+
 <p align="center">Weekly anime, delivered. You follow shows; new episodes land in your folder by themselves; you press Play.</p>
 
 <p align="center"><img src="docs/flow.svg" alt="AniList schedule → nyaa.si search → release rules → your torrent app → your folder → folder scanner → Play next → your media player" width="960"></p>
